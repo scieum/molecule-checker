@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api:*)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(t[''''path'''']\\) for t in d[''''tree'''']]\")",
+      "Bash(curl -s https://raw.githubusercontent.com/scieum/guess-molecular-quiz/main/src/lib/molecules.ts)"
+    ]
+  }
+}

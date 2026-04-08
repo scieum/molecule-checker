@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Molecule Checker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #1B2B6B;
+    --navy-deep: #0F1847;
+    --ink: #0B0B0F;
+    --lime: #D4FF3F;
+    --mint: #7CF9C3;
+    --cream: #F4F1E8;
+  }
+  html, body { font-family: 'Noto Sans KR', sans-serif; }
+  .font-display { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; letter-spacing: -0.01em; }
+  .bg-navy { background: var(--navy); }
+  .bg-navy-deep { background: var(--navy-deep); }
+  .bg-ink { background: var(--ink); }
+  .bg-lime { background: var(--lime); }
+  .bg-mint { background: var(--mint); }
+  .bg-cream { background: var(--cream); }
+  .text-navy { color: var(--navy); }
+  .text-lime { color: var(--lime); }
+  .text-mint { color: var(--mint); }
+  .card-shadow { box-shadow: 0 10px 30px rgba(15,24,71,.12); }
+  .pill { border-radius: 9999px; }
+  .rounded-chunk { border-radius: 28px; }
+  .dot-bg {
+    background-image: radial-gradient(rgba(255,255,255,.12) 1px, transparent 1px);
+    background-size: 14px 14px;
+  }
+  .scribble::before {
+    content: ""; position: absolute; inset: -6px -10px;
+    border: 2px dashed rgba(255,255,255,.35); border-radius: 9999px;
+    transform: rotate(-3deg);
+  }
+  .shake { animation: shake .5s; }
+  @keyframes shake {
+    0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)}
+  }
+  .pop { animation: pop .4s ease-out; }
+  @keyframes pop { 0%{transform:scale(.9);opacity:0} 100%{transform:scale(1);opacity:1} }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="bg-cream min-h-screen">
+
+<div class="max-w-md mx-auto px-5 pt-8 pb-24">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-2">
+      <div class="w-9 h-9 rounded-full bg-ink flex items-center justify-center">
+        <span class="text-lime font-display text-lg">M</span>
+      </div>
+      <span class="font-display text-navy text-xl">MOLECULE</span>
+    </div>
+    <button class="w-10 h-10 rounded-full bg-white card-shadow flex items-center justify-center text-navy">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <div id="view-home">
+  <!-- Hero banner (navy card) -->
+  <section class="bg-navy rounded-chunk p-6 card-shadow relative overflow-hidden mb-5">
+    <div class="absolute inset-0 dot-bg opacity-60"></div>
+    <div class="relative">
+      <div class="inline-block pill bg-lime text-ink px-3 py-1 text-xs font-bold mb-3">AI CHEMISTRY</div>
+      <h1 class="font-display text-white text-[34px] leading-[1.1] mb-1">분자, 맞게<br/>만들었을까?</h1>
+      <p class="text-white/70 text-sm">사진 한 장으로 유효성 즉시 확인</p>
+    </div>
+  </section>
+
+  <!-- Input choice cards -->
+  <section class="grid grid-cols-2 gap-3 mb-5">
+    <button id="btn-camera" class="bg-white rounded-chunk p-5 card-shadow text-left active:scale-95 transition">
+      <div class="w-11 h-11 rounded-full bg-navy flex items-center justify-center mb-3">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D4FF3F" stroke-width="2.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </div>
+      <div class="font-display text-navy text-lg leading-tight">카메라<br/>촬영</div>
+      <div class="text-xs text-gray-500 mt-1">실시간 인식</div>
+    </button>
+    <label for="file-input" class="bg-ink rounded-chunk p-5 card-shadow text-left active:scale-95 transition cursor-pointer block">
+      <div class="w-11 h-11 rounded-full bg-lime flex items-center justify-center mb-3">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0B0B0F" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <div class="font-display text-white text-lg leading-tight">파일<br/>업로드</div>
+      <div class="text-xs text-white/60 mt-1">JPG · PNG · 10MB</div>
+      <input id="file-input" type="file" accept="image/*" class="hidden"/>
+    </label>
+  </section>
+
+  <!-- Preview -->
+  <section id="preview-section" class="hidden bg-white rounded-chunk p-4 card-shadow mb-5">
+    <div class="text-xs font-bold text-gray-500 mb-2 tracking-wider">PREVIEW</div>
+    <img id="preview-img" class="w-full rounded-2xl object-cover max-h-72" alt=""/>
+    <button id="analyze-btn" class="mt-4 w-full bg-ink text-lime font-display text-lg py-4 pill active:scale-95 transition">
+      분석 시작하기 →
+    </button>
+  </section>
+
+  <!-- Loading -->
+  <section id="loading-section" class="hidden bg-navy rounded-chunk p-8 card-shadow mb-5 text-center">
+    <div class="w-14 h-14 rounded-full border-4 border-lime/30 border-t-lime spin mx-auto mb-4"></div>
+    <div class="font-display text-white text-xl">분자 분석 중...</div>
+    <div class="text-white/60 text-sm mt-1">Gemini Vision이 원자를 읽고 있어요</div>
+  </section>
+
+  <!-- Result -->
+  <section id="result-section" class="hidden mb-5"></section>
+
+  <!-- Tips -->
+  <section class="bg-white rounded-chunk p-5 card-shadow mb-5">
+    <div class="flex items-center justify-between mb-4">
+      <div class="font-display text-navy text-lg">TIPS</div>
+      <span class="text-xs text-gray-400">촬영 가이드</span>
+    </div>
+    <ul class="space-y-3">
+      <li class="flex gap-3 items-start">
+        <div class="w-7 h-7 rounded-full bg-lime text-ink font-display flex items-center justify-center shrink-0 text-sm">1</div>
+        <div class="text-sm text-gray-700">밝은 조명 아래, 흰 배경 위에서 촬영</div>
+      </li>
+      <li class="flex gap-3 items-start">
+        <div class="w-7 h-7 rounded-full bg-mint text-ink font-display flex items-center justify-center shrink-0 text-sm">2</div>
+        <div class="text-sm text-gray-700">모든 원자(공)가 화면에 보이게</div>
+      </li>
+      <li class="flex gap-3 items-start">
+        <div class="w-7 h-7 rounded-full bg-navy text-lime font-display flex items-center justify-center shrink-0 text-sm">3</div>
+        <div class="text-sm text-gray-700">CPK 색상이 또렷하게 구분되도록</div>
+      </li>
+    </ul>
+  </section>
+  </div><!-- /view-home -->
+
+  <!-- Catalog view -->
+  <div id="view-catalog" class="hidden">
+    <section class="bg-navy rounded-chunk p-6 card-shadow relative overflow-hidden mb-5">
+      <div class="absolute inset-0 dot-bg opacity-50"></div>
+      <div class="relative">
+        <div class="inline-block pill bg-lime text-ink px-3 py-1 text-xs font-bold mb-3">CATALOG</div>
+        <h1 class="font-display text-white text-[32px] leading-[1.1] mb-1">만들 수 있는<br/>분자 도감</h1>
+        <p class="text-white/70 text-sm">모형 키트로 조립 가능한 <span id="catalog-count" class="text-lime font-bold"></span></p>
+      </div>
+    </section>
+    <section class="bg-white rounded-chunk p-4 card-shadow">
+      <div id="catalog-grid" class="grid grid-cols-2 gap-2.5"></div>
+    </section>
+  </div>
+</div>
+
+<!-- Bottom nav -->
+<nav class="fixed bottom-0 inset-x-0 max-w-md mx-auto bg-white border-t border-gray-100 px-6 py-3 flex justify-around items-center">
+  <button data-nav="home" class="flex flex-col items-center gap-1 text-navy">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    <span class="text-[10px] font-bold">홈</span>
+  </button>
+  <button class="flex flex-col items-center gap-1 text-gray-400">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+    <span class="text-[10px] font-bold">기록</span>
+  </button>
+  <button class="w-14 h-14 rounded-full bg-lime border-4 border-white -mt-8 card-shadow flex items-center justify-center">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0B0B0F" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+  <button data-nav="catalog" class="flex flex-col items-center gap-1 text-gray-400">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+    <span class="text-[10px] font-bold">도감</span>
+  </button>
+  <button class="flex flex-col items-center gap-1 text-gray-400">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+    <span class="text-[10px] font-bold">내정보</span>
+  </button>
+</nav>
+
+<script>
+// Buildable molecules (from scieum/guess-molecular-quiz)
+const BUILDABLE = [
+  {f:'H₂O',kr:'물',en:'Water'},{f:'CO₂',kr:'이산화 탄소',en:'Carbon Dioxide'},
+  {f:'NH₃',kr:'암모니아',en:'Ammonia'},{f:'CH₄',kr:'메테인',en:'Methane'},
+  {f:'BF₃',kr:'삼플루오린화 붕소',en:'Boron Trifluoride'},{f:'NF₃',kr:'삼플루오린화 질소',en:'Nitrogen Trifluoride'},
+  {f:'OF₂',kr:'이플루오린화 산소',en:'Oxygen Difluoride'},{f:'CCl₄',kr:'사염화 탄소',en:'Carbon Tetrachloride'},
+  {f:'CS₂',kr:'이황화 탄소',en:'Carbon Disulfide'},{f:'SO₂',kr:'이산화 황',en:'Sulfur Dioxide'},
+  {f:'H₂S',kr:'황화 수소',en:'Hydrogen Sulfide'},{f:'HCl',kr:'염화 수소',en:'Hydrogen Chloride'},
+  {f:'HF',kr:'플루오린화 수소',en:'Hydrogen Fluoride'},{f:'N₂',kr:'질소',en:'Nitrogen'},
+  {f:'O₂',kr:'산소',en:'Oxygen'},{f:'Cl₂',kr:'염소',en:'Chlorine'},
+  {f:'F₂',kr:'플루오린',en:'Fluorine'},{f:'PCl₃',kr:'삼염화 인',en:'Phosphorus Trichloride'},
+  {f:'CF₄',kr:'사플루오린화 탄소',en:'Carbon Tetrafluoride'},{f:'H₂',kr:'수소',en:'Hydrogen'},
+  {f:'ClF',kr:'플루오린화 염소',en:'Chlorine Monofluoride'},{f:'ICl',kr:'염화 아이오딘',en:'Iodine Monochloride'},
+  {f:'BrF',kr:'플루오린화 브로민',en:'Bromine Monofluoride'},{f:'CO',kr:'일산화 탄소',en:'Carbon Monoxide'},
+  {f:'HBr',kr:'브로민화 수소',en:'Hydrogen Bromide'},{f:'HCN',kr:'시안화 수소',en:'Hydrogen Cyanide'},
+  {f:'CH₂O',kr:'폼알데하이드',en:'Formaldehyde'},{f:'COCl₂',kr:'포스겐',en:'Phosgene'},
+  {f:'SiH₄',kr:'실레인',en:'Silane'},{f:'SiF₄',kr:'사플루오린화 규소',en:'Silicon Tetrafluoride'},
+  {f:'PH₃',kr:'포스핀',en:'Phosphine'},{f:'SCl₂',kr:'이염화 황',en:'Sulfur Dichloride'},
+  {f:'H₂O₂',kr:'과산화 수소',en:'Hydrogen Peroxide'},{f:'C₂H₂',kr:'에타인',en:'Acetylene'},
+  {f:'C₂H₄',kr:'에텐',en:'Ethylene'},{f:'C₂H₆',kr:'에테인',en:'Ethane'},
+  {f:'N₂F₂',kr:'이플루오린화 이질소',en:'Dinitrogen Difluoride'},{f:'N₂F₄',kr:'사플루오린화 이질소',en:'Dinitrogen Tetrafluoride'},
+  {f:'O₂F₂',kr:'이플루오린화 이산소',en:'Dioxygen Difluoride'},{f:'C₂F₂',kr:'디플루오로에타인',en:'Difluoroacetylene'},
+  {f:'NOCl',kr:'염화 나이트로실',en:'Nitrosyl Chloride'},{f:'FCN',kr:'플루오린화 사이아노젠',en:'Cyanogen Fluoride'},
+  {f:'FNO',kr:'플루오린화 나이트로실',en:'Nitrosyl Fluoride'},{f:'HNO',kr:'나이트록실',en:'Nitroxyl'},
+];
+const grid = document.getElementById('catalog-grid');
+document.getElementById('catalog-count').textContent = `${BUILDABLE.length}종`;
+grid.innerHTML = BUILDABLE.map((m,i) => `
+  <div class="bg-cream hover:bg-lime rounded-2xl p-3 transition cursor-pointer group" title="${m.en}">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-[10px] font-bold text-gray-400">#${String(i+1).padStart(2,'0')}</span>
+      <span class="w-5 h-5 rounded-full bg-navy text-lime text-[9px] font-display flex items-center justify-center">M</span>
+    </div>
+    <div class="font-display text-navy text-xl leading-none">${m.f}</div>
+    <div class="text-gray-600 text-xs mt-1 truncate">${m.kr}</div>
+  </div>
+`).join('');
+
+// View toggle
+const viewHome = document.getElementById('view-home');
+const viewCatalog = document.getElementById('view-catalog');
+function showView(name) {
+  viewHome.classList.toggle('hidden', name !== 'home');
+  viewCatalog.classList.toggle('hidden', name !== 'catalog');
+  document.querySelectorAll('[data-nav]').forEach(b => {
+    b.classList.toggle('text-navy', b.dataset.nav === name);
+    b.classList.toggle('text-gray-400', b.dataset.nav !== name);
+  });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+document.querySelectorAll('[data-nav]').forEach(b => {
+  b.addEventListener('click', () => showView(b.dataset.nav));
+});
+
+const fileInput = document.getElementById('file-input');
+const previewSection = document.getElementById('preview-section');
+const previewImg = document.getElementById('preview-img');
+const analyzeBtn = document.getElementById('analyze-btn');
+const loadingSection = document.getElementById('loading-section');
+const resultSection = document.getElementById('result-section');
+let currentBase64 = null;
+
+fileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { alert('10MB 이하 파일만 업로드 가능합니다.'); return; }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    previewImg.src = ev.target.result;
+    currentBase64 = ev.target.result.split(',')[1];
+    previewSection.classList.remove('hidden');
+    resultSection.classList.add('hidden');
+    previewSection.scrollIntoView({ behavior: 'smooth' });
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('btn-camera').addEventListener('click', () => {
+  fileInput.setAttribute('capture', 'environment');
+  fileInput.click();
+});
+
+analyzeBtn.addEventListener('click', async () => {
+  if (!currentBase64) return;
+  previewSection.classList.add('hidden');
+  loadingSection.classList.remove('hidden');
+  resultSection.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: currentBase64, mimeType: 'image/jpeg' })
+    });
+    if (!res.ok) throw new Error('server');
+    const data = await res.json();
+    renderResult(data);
+  } catch (err) {
+    // Fallback mock (draft mode)
+    renderResult({
+      is_valid: true,
+      molecule_name_kr: "에탄올",
+      molecule_name_en: "Ethanol",
+      formula: "C₂H₅OH",
+      explanation: "탄소 2개, 산소 1개, 수소 6개가 모두 원자가 규칙을 충족합니다. (※ 백엔드 미연결 — 목업 결과)",
+      functional_groups: ["하이드록시기 (-OH)"],
+      confidence: "high"
+    });
+  } finally {
+    loadingSection.classList.add('hidden');
+  }
+});
+
+function renderResult(d) {
+  const valid = d.is_valid === true;
+  const unknown = d.is_valid === null;
+  const bg = valid ? 'bg-mint' : unknown ? 'bg-cream' : 'bg-[#FF5C5C]';
+  const label = valid ? '유효 분자' : unknown ? '감지 실패' : '무효 분자';
+  const labelIcon = valid ? '✓' : unknown ? '?' : '✕';
+  const anim = valid ? 'pop' : 'shake';
+
+  resultSection.innerHTML = `
+    <div class="${bg} rounded-chunk p-6 card-shadow ${anim}">
+      <div class="flex items-center justify-between mb-4">
+        <div class="inline-flex items-center gap-2 bg-ink text-white pill px-3 py-1 text-xs font-bold">
+          <span class="w-5 h-5 rounded-full ${valid?'bg-lime text-ink':'bg-white text-ink'} flex items-center justify-center text-[11px] font-black">${labelIcon}</span>
+          ${label}
+        </div>
+        <span class="text-xs font-bold text-ink/60">${(d.confidence||'').toUpperCase()}</span>
+      </div>
+      <div class="font-display text-ink text-[42px] leading-none mb-1">${d.molecule_name_kr || '—'}</div>
+      <div class="text-ink/70 text-sm mb-3">${d.molecule_name_en || ''}</div>
+      <div class="inline-block bg-ink text-lime font-display text-2xl px-4 py-2 rounded-2xl mb-4">${d.formula || '?'}</div>
+      <p class="text-ink/80 text-sm leading-relaxed mb-4">${d.explanation || ''}</p>
+      ${(d.functional_groups && d.functional_groups.length) ? `
+        <div class="flex flex-wrap gap-2 mb-4">
+          ${d.functional_groups.map(g=>`<span class="bg-white/60 text-ink text-xs font-bold px-3 py-1 pill">${g}</span>`).join('')}
+        </div>` : ''}
+      <button onclick="location.reload()" class="w-full bg-ink text-white font-display text-lg py-4 pill active:scale-95">
+        다시 찍기
+      </button>
+    </div>
+  `;
+  resultSection.classList.remove('hidden');
+  resultSection.scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+</body>
+</html>
