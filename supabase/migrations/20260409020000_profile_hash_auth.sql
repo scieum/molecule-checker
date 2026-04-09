@@ -27,6 +27,10 @@ alter table public.profiles
 -- Use a real UNIQUE constraint (not a partial index) so PostgREST's
 -- upsert `onConflict: 'profile_hash'` path can actually use it. NULLs
 -- are still allowed to repeat under Postgres's default behavior.
+-- Drop any earlier partial-index version first so the constraint name
+-- is free to be reused.
+drop index if exists public.profiles_profile_hash_unique;
+
 do $$
 begin
   if not exists (
@@ -36,8 +40,6 @@ begin
       add constraint profiles_profile_hash_unique unique (profile_hash);
   end if;
 end $$;
-
-drop index if exists public.profiles_profile_hash_unique;
 
 drop policy if exists "profiles are readable by owner" on public.profiles;
 drop policy if exists "profiles insertable by owner" on public.profiles;
