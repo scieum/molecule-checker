@@ -311,6 +311,14 @@ function currentUserCode() {
 // Stash a (nickname, code) identity into the current anonymous user's
 // metadata. No email/password change, so GoTrue's email validator is
 // never invoked. Returns the freshly computed profile_hash.
+//
+// IMPORTANT: supabase.auth.updateUser({ data }) writes the new metadata
+// into auth.users but does NOT rotate the client's access token. The
+// old JWT the client keeps sending still carries the old (or empty)
+// user_metadata, so RLS policies that read `auth.jwt() -> user_metadata`
+// see stale data and block every insert with "row-level security
+// policy" errors. Force a refreshSession() right after the update so
+// the next request ships a JWT that actually contains profile_hash.
 async function bindIdentity(nickname, code) {
   const profile_hash = await profileHashFor(nickname, code);
   const { data, error } = await supabase.auth.updateUser({
@@ -322,6 +330,11 @@ async function bindIdentity(nickname, code) {
   });
   if (error) throw error;
   if (data?.user) currentUser = data.user;
+
+  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError) throw refreshError;
+  if (refreshed?.user) currentUser = refreshed.user;
+
   return profile_hash;
 }
 
@@ -1162,8 +1175,8 @@ async function openSettingsModal() {
     if (!profile) {
       // Roll back so we don't leave the user pinned to a non-existent identity.
       await supabase.auth.updateUser({ data: previousMeta });
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) currentUser = user;
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed?.user) currentUser = refreshed.user;
       alert('로그인 실패: 닉네임과 코드가 일치하는 계정을 찾을 수 없습니다');
       btn.disabled = false;
       btn.textContent = '로그인';
@@ -1187,8 +1200,8 @@ async function openSettingsModal() {
     // Make sure no stale profile_hash remains on the new anonymous user.
     if (currentUser?.user_metadata?.profile_hash) {
       await supabase.auth.updateUser({ data: { profile_hash: null, code: null, nickname: null } });
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) currentUser = user;
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed?.user) currentUser = refreshed.user;
     }
     close();
     renderProfile();
