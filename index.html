@@ -417,15 +417,57 @@ async function deleteHallEntry(id) {
 }
 
 // Submit modal
-function openSubmitModal() {
+async function openSubmitModal() {
+  if (!supabase || !currentUser) {
+    alert('Supabase 설정이 필요합니다. index.html 상단의 SUPABASE_URL / SUPABASE_ANON_KEY를 채워 주세요.');
+    return;
+  }
+
+  // Pre-load profile and gallery so we can pre-fill fields and show a
+  // "pick from gallery" shortcut for users who already saved molecules.
+  const [profile, gallery] = await Promise.all([
+    loadProfile(),
+    loadGallery(),
+  ]);
+  const validGallery = gallery.filter(g => g.is_valid);
+
   const modal = document.createElement('div');
   modal.className = 'fixed inset-0 bg-ink/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4';
+
+  const gallerySection = validGallery.length > 0 ? `
+    <div class="mb-4">
+      <div class="text-xs font-bold text-gray-600 mb-2">내 갤러리에서 선택</div>
+      <div class="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        ${validGallery.map((g, i) => `
+          <button type="button" data-gallery-idx="${i}" class="shrink-0 w-20 bg-white rounded-2xl overflow-hidden active:scale-95 transition border-2 border-transparent text-left">
+            <div class="w-20 h-20 bg-navy relative">
+              ${g.img ? `<img src="${g.img}" class="w-full h-full object-cover"/>` : `<div class="w-full h-full flex items-center justify-center text-lime font-display text-xs">${g.formula||'?'}</div>`}
+            </div>
+            <div class="px-1 py-1">
+              <div class="text-[10px] text-navy font-bold truncate">${g.molecule_name_kr||'—'}</div>
+            </div>
+          </button>
+        `).join('')}
+      </div>
+      <div class="text-[10px] text-gray-400 mt-1">탭하면 사진·분자명·원자 수가 자동으로 채워집니다</div>
+    </div>
+    <div class="flex items-center gap-2 mb-3">
+      <div class="flex-1 h-px bg-gray-300"></div>
+      <div class="text-[10px] font-bold text-gray-400">또는 직접 업로드</div>
+      <div class="flex-1 h-px bg-gray-300"></div>
+    </div>
+  ` : '';
+
+  const nickEsc = (profile?.nickname || '').replace(/"/g, '&quot;');
+  const schoolEsc = (profile?.schoolName || '').replace(/"/g, '&quot;');
+
   modal.innerHTML = `
     <div class="bg-cream rounded-chunk w-full max-w-md p-6 card-shadow max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <div class="font-display text-navy text-xl">작품 등록</div>
         <button id="modal-close" class="w-9 h-9 rounded-full bg-white flex items-center justify-center text-ink">✕</button>
       </div>
+      ${gallerySection}
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">사진</div>
         <input type="file" id="s-img" accept="image/*" class="block w-full text-sm bg-white rounded-2xl p-3"/>
@@ -433,11 +475,11 @@ function openSubmitModal() {
       </label>
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
-        <input id="s-user" class="w-full bg-white rounded-2xl p-3 text-sm" placeholder="예: 화학왕민준"/>
+        <input id="s-user" class="w-full bg-white rounded-2xl p-3 text-sm" placeholder="예: 화학왕민준" value="${nickEsc}"/>
       </label>
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">학교</div>
-        <input id="s-school" class="w-full bg-white rounded-2xl p-3 text-sm" placeholder="예: ○○고등학교"/>
+        <input id="s-school" class="w-full bg-white rounded-2xl p-3 text-sm" placeholder="예: ○○고등학교" value="${schoolEsc}"/>
       </label>
       <div class="grid grid-cols-2 gap-3 mb-3">
         <label class="block">
@@ -464,19 +506,44 @@ function openSubmitModal() {
 
   const imgInput = modal.querySelector('#s-img');
   const imgPreview = modal.querySelector('#s-preview');
-  let imgData = '';
+  let imgData = '';            // base64 of a newly uploaded file
+  let selectedImagePath = '';  // storage path reused from a gallery pick
+
   imgInput.addEventListener('change', (e) => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();
-    r.onload = ev => { imgData = ev.target.result; imgPreview.src = imgData; imgPreview.classList.remove('hidden'); };
+    r.onload = ev => {
+      imgData = ev.target.result;
+      selectedImagePath = '';
+      imgPreview.src = imgData;
+      imgPreview.classList.remove('hidden');
+      modal.querySelectorAll('[data-gallery-idx]').forEach(b => b.classList.remove('border-lime'));
+    };
     r.readAsDataURL(f);
   });
 
+  // Gallery picker: fill fields from a saved molecule and reuse its image.
+  modal.querySelectorAll('[data-gallery-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.galleryIdx);
+      const g = validGallery[idx];
+      if (!g) return;
+      modal.querySelectorAll('[data-gallery-idx]').forEach(b => b.classList.remove('border-lime'));
+      btn.classList.add('border-lime');
+      modal.querySelector('#s-mol').value = g.molecule_name_kr || '';
+      modal.querySelector('#s-formula').value = g.formula || '';
+      modal.querySelector('#s-atoms').value = g.atoms || '';
+      if (g.img) {
+        imgPreview.src = g.img;
+        imgPreview.classList.remove('hidden');
+      }
+      selectedImagePath = g.image_path || '';
+      imgData = '';
+      imgInput.value = '';
+    });
+  });
+
   modal.querySelector('#s-submit').addEventListener('click', async () => {
-    if (!supabase || !currentUser) {
-      alert('Supabase 설정이 필요합니다. index.html 상단의 SUPABASE_URL / SUPABASE_ANON_KEY를 채워 주세요.');
-      return;
-    }
     const atoms = parseInt(modal.querySelector('#s-atoms').value) || 0;
     if (!atoms) { alert('원자 수를 입력해주세요'); return; }
 
@@ -484,8 +551,10 @@ function openSubmitModal() {
     submitBtn.disabled = true;
     submitBtn.textContent = '등록 중...';
 
-    let imagePath = null;
-    if (imgData) {
+    // Reuse the gallery entry's storage path if the user picked one;
+    // otherwise upload a fresh file if they selected a new image.
+    let imagePath = selectedImagePath;
+    if (!imagePath && imgData) {
       imagePath = await uploadImage(imgData, 'image/jpeg');
     }
 
@@ -586,6 +655,7 @@ async function loadGallery() {
     formula: r.formula,
     is_valid: r.is_valid,
     atoms: r.atoms || 0,
+    image_path: r.image_path,
     img: publicImageUrl(r.image_path),
     date: (r.created_at || '').slice(0, 10),
   }));
