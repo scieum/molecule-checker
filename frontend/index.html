@@ -176,6 +176,19 @@
     </section>
   </div>
 
+  <!-- Profile view -->
+  <div id="view-profile" class="hidden">
+    <section class="bg-navy rounded-chunk p-6 card-shadow relative overflow-hidden mb-5">
+      <div class="absolute inset-0 dot-bg opacity-50"></div>
+      <div class="relative">
+        <div class="inline-block pill bg-lime text-ink px-3 py-1 text-xs font-bold mb-3">PROFILE</div>
+        <h1 class="font-display text-white text-[32px] leading-[1.1] mb-1">내 정보</h1>
+        <p class="text-white/70 text-sm">닉네임 · 학교 · 내 분자 갤러리</p>
+      </div>
+    </section>
+    <div id="profile-body"></div>
+  </div>
+
   <!-- Hall of Fame view -->
   <div id="view-hall" class="hidden">
     <section class="bg-ink rounded-chunk p-6 card-shadow relative overflow-hidden mb-5">
@@ -189,6 +202,16 @@
     <section id="hall-list" class="space-y-3"></section>
   </div>
 </div>
+
+<!-- Footer -->
+<footer class="max-w-md mx-auto px-5 pb-28 pt-4 text-center text-xs text-gray-500">
+  <div class="flex items-center justify-center gap-2">
+    <span>© 2026 사이음(sci_eum). 과학의 사이, 사람을 잇다.</span>
+    <a href="https://www.instagram.com/sci_eum/" target="_blank" rel="noopener" class="text-gray-400 hover:text-gray-600 transition" aria-label="Instagram">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+    </a>
+  </div>
+</footer>
 
 <!-- Bottom nav -->
 <nav class="fixed bottom-0 inset-x-0 max-w-md mx-auto bg-white border-t border-gray-100 px-6 py-3 flex justify-around items-center">
@@ -207,7 +230,7 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
     <span class="text-[10px] font-bold">도감</span>
   </button>
-  <button class="flex flex-col items-center gap-1 text-gray-400">
+  <button data-nav="profile" class="flex flex-col items-center gap-1 text-gray-400">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
     <span class="text-[10px] font-bold">내정보</span>
   </button>
@@ -381,11 +404,201 @@ function openSubmitModal() {
   });
 }
 
+// ===== NEIS School Search (ref: scieum/polarity-timeattack) =====
+const NEIS_API_KEY = ""; // TODO: 발급 후 여기에 입력 (없어도 저용량 호출 가능)
+const NEIS_REGIONS = [
+  {code:'B10',name:'서울'},{code:'C10',name:'부산'},{code:'D10',name:'대구'},{code:'E10',name:'인천'},
+  {code:'F10',name:'광주'},{code:'G10',name:'대전'},{code:'H10',name:'울산'},{code:'I10',name:'세종'},
+  {code:'J10',name:'경기'},{code:'K10',name:'강원'},{code:'M10',name:'충북'},{code:'N10',name:'충남'},
+  {code:'P10',name:'전북'},{code:'Q10',name:'전남'},{code:'R10',name:'경북'},{code:'S10',name:'경남'},
+  {code:'T10',name:'제주'},
+];
+const NEIS_KINDS = ['고등학교','중학교','초등학교'];
+
+async function fetchSchools(regionCode, kind, query) {
+  const url = new URL('https://open.neis.go.kr/hub/schoolInfo');
+  url.searchParams.set('Type','json');
+  url.searchParams.set('pIndex','1');
+  url.searchParams.set('pSize','200');
+  url.searchParams.set('ATPT_OFCDC_SC_CODE', regionCode);
+  url.searchParams.set('SCHUL_KND_SC_NM', kind);
+  if (query && query.trim()) url.searchParams.set('SCHUL_NM', query.trim());
+  if (NEIS_API_KEY) url.searchParams.set('KEY', NEIS_API_KEY);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error('NEIS 요청 실패 ('+res.status+')');
+  const j = await res.json();
+  if (!j.schoolInfo || !j.schoolInfo[1] || !j.schoolInfo[1].row) return [];
+  return j.schoolInfo[1].row.map(r => ({
+    code: r.SD_SCHUL_CODE, name: r.SCHUL_NM, address: r.ORG_RDNMA || ''
+  }));
+}
+
+// ===== Profile & Gallery =====
+const PROFILE_KEY = 'molecule-profile';
+const GALLERY_KEY = 'molecule-gallery';
+function loadProfile() { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)); } catch { return null; } }
+function saveProfile(p) { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); }
+function loadGallery() { try { return JSON.parse(localStorage.getItem(GALLERY_KEY)) || []; } catch { return []; } }
+function saveGallery(g) { localStorage.setItem(GALLERY_KEY, JSON.stringify(g)); }
+
+function renderProfile() {
+  const body = document.getElementById('profile-body');
+  const p = loadProfile();
+  if (!p) { body.innerHTML = profileSetupHTML(); wireProfileSetup(); return; }
+
+  const gallery = loadGallery();
+  body.innerHTML = `
+    <section class="bg-white rounded-chunk p-5 card-shadow mb-4">
+      <div class="flex items-center gap-4">
+        <div class="w-16 h-16 rounded-full bg-lime flex items-center justify-center font-display text-ink text-2xl shrink-0">
+          ${(p.nickname||'?').slice(0,1)}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="font-display text-navy text-xl truncate">${p.nickname}</div>
+          <div class="text-sm text-gray-500 truncate">${p.schoolName || '학교 미설정'}</div>
+        </div>
+        <button id="profile-edit" class="pill bg-ink text-lime text-xs font-bold px-3 py-2">편집</button>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+        <div class="bg-cream rounded-2xl p-3">
+          <div class="font-display text-navy text-xl">${gallery.length}</div>
+          <div class="text-[10px] text-gray-500 font-bold">저장한 분자</div>
+        </div>
+        <div class="bg-cream rounded-2xl p-3">
+          <div class="font-display text-navy text-xl">${gallery.filter(g=>g.is_valid).length}</div>
+          <div class="text-[10px] text-gray-500 font-bold">유효 분자</div>
+        </div>
+        <div class="bg-cream rounded-2xl p-3">
+          <div class="font-display text-navy text-xl">${gallery.reduce((a,g)=>Math.max(a,g.atoms||0),0)}</div>
+          <div class="text-[10px] text-gray-500 font-bold">최대 원자수</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-white rounded-chunk p-4 card-shadow">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-display text-navy text-lg">내 분자 갤러리</div>
+        <span class="text-xs text-gray-400">${gallery.length}개</span>
+      </div>
+      ${gallery.length === 0 ? `
+        <div class="text-center py-10">
+          <div class="text-4xl mb-2">🧪</div>
+          <div class="font-display text-navy text-base mb-1">아직 저장한 분자가 없어요</div>
+          <div class="text-xs text-gray-500">분석 후 '갤러리에 저장'을 눌러보세요</div>
+        </div>` : `
+        <div class="grid grid-cols-2 gap-2.5">
+          ${gallery.map((g,i)=>`
+            <div class="bg-cream rounded-2xl overflow-hidden">
+              <div class="aspect-square bg-navy relative">
+                ${g.img ? `<img src="${g.img}" class="w-full h-full object-cover"/>` : `<div class="w-full h-full flex items-center justify-center text-lime font-display text-3xl">${g.formula||'?'}</div>`}
+                <button data-del="${i}" class="absolute top-1 right-1 w-6 h-6 rounded-full bg-ink/70 text-white text-xs">✕</button>
+              </div>
+              <div class="p-2">
+                <div class="font-display text-navy text-sm truncate">${g.molecule_name_kr||'—'}</div>
+                <div class="text-[10px] text-gray-500 truncate">${g.formula||''}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </section>
+  `;
+  document.getElementById('profile-edit').addEventListener('click', () => { body.innerHTML = profileSetupHTML(p); wireProfileSetup(); });
+  body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', e => {
+    const i = +e.currentTarget.dataset.del;
+    const g = loadGallery(); g.splice(i,1); saveGallery(g); renderProfile();
+  }));
+}
+
+function profileSetupHTML(p) {
+  return `
+    <section class="bg-white rounded-chunk p-5 card-shadow">
+      <div class="font-display text-navy text-lg mb-4">프로필 설정</div>
+      <label class="block mb-3">
+        <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
+        <input id="p-nick" class="w-full bg-cream rounded-2xl p-3 text-sm" value="${p?.nickname||''}" placeholder="예: 화학왕민준"/>
+      </label>
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <label class="block">
+          <div class="text-xs font-bold text-gray-600 mb-1">시/도</div>
+          <select id="p-region" class="w-full bg-cream rounded-2xl p-3 text-sm">
+            <option value="">선택</option>
+            ${NEIS_REGIONS.map(r=>`<option value="${r.code}" ${p?.regionCode===r.code?'selected':''}>${r.name}</option>`).join('')}
+          </select>
+        </label>
+        <label class="block">
+          <div class="text-xs font-bold text-gray-600 mb-1">학교급</div>
+          <select id="p-kind" class="w-full bg-cream rounded-2xl p-3 text-sm">
+            ${NEIS_KINDS.map(k=>`<option value="${k}" ${p?.kind===k?'selected':''}>${k}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="flex gap-2 mb-2">
+        <input id="p-query" class="flex-1 bg-cream rounded-2xl p-3 text-sm" placeholder="학교명 검색"/>
+        <button id="p-search" class="pill bg-ink text-lime font-bold text-sm px-4">검색</button>
+      </div>
+      <div id="p-result" class="text-xs"></div>
+      <div class="mt-3 text-xs">
+        <span class="text-gray-500">선택된 학교: </span>
+        <span id="p-selected" class="font-bold text-navy">${p?.schoolName||'—'}</span>
+      </div>
+      <button id="p-save" class="mt-4 w-full bg-lime text-ink font-display text-lg py-4 pill active:scale-95">저장</button>
+    </section>
+  `;
+}
+
+function wireProfileSetup() {
+  const resultEl = document.getElementById('p-result');
+  const selectedEl = document.getElementById('p-selected');
+  let selected = null;
+  const existing = loadProfile();
+  if (existing) selected = { name: existing.schoolName, code: existing.schoolCode };
+
+  document.getElementById('p-search').addEventListener('click', async () => {
+    const region = document.getElementById('p-region').value;
+    const kind = document.getElementById('p-kind').value;
+    const q = document.getElementById('p-query').value;
+    if (!region) { resultEl.innerHTML = '<span class="text-red-500">시/도를 선택하세요</span>'; return; }
+    if (!q.trim()) { resultEl.innerHTML = '<span class="text-red-500">학교명을 입력하세요</span>'; return; }
+    resultEl.innerHTML = '<span class="text-gray-500">검색 중...</span>';
+    try {
+      const list = await fetchSchools(region, kind, q);
+      if (list.length === 0) { resultEl.innerHTML = '<span class="text-gray-500">결과 없음</span>'; return; }
+      resultEl.innerHTML = `<div class="max-h-40 overflow-y-auto space-y-1 mt-2">${list.map(s=>`
+        <button data-code="${s.code}" data-name="${s.name}" class="w-full text-left bg-cream hover:bg-lime rounded-xl p-2 text-xs">
+          <div class="font-bold text-navy">${s.name}</div>
+          <div class="text-gray-500 truncate">${s.address}</div>
+        </button>
+      `).join('')}</div>`;
+      resultEl.querySelectorAll('button[data-code]').forEach(b => b.addEventListener('click', () => {
+        selected = { code: b.dataset.code, name: b.dataset.name };
+        selectedEl.textContent = selected.name;
+      }));
+    } catch (e) { resultEl.innerHTML = `<span class="text-red-500">${e.message}</span>`; }
+  });
+
+  document.getElementById('p-save').addEventListener('click', () => {
+    const nick = document.getElementById('p-nick').value.trim();
+    if (!nick) { alert('닉네임을 입력해주세요'); return; }
+    saveProfile({
+      nickname: nick,
+      regionCode: document.getElementById('p-region').value,
+      kind: document.getElementById('p-kind').value,
+      schoolCode: selected?.code || null,
+      schoolName: selected?.name || null,
+    });
+    renderProfile();
+  });
+}
+
+renderProfile();
+
 // View toggle
 const views = {
   home: document.getElementById('view-home'),
   catalog: document.getElementById('view-catalog'),
   hall: document.getElementById('view-hall'),
+  profile: document.getElementById('view-profile'),
 };
 function showView(name) {
   Object.entries(views).forEach(([k,el]) => el.classList.toggle('hidden', k !== name));
@@ -393,6 +606,8 @@ function showView(name) {
     b.classList.toggle('text-navy', b.dataset.nav === name);
     b.classList.toggle('text-gray-400', b.dataset.nav !== name);
   });
+  if (name === 'profile') renderProfile();
+  if (name === 'hall') renderHall();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 document.querySelectorAll('[data-nav]').forEach(b => {
@@ -541,13 +756,26 @@ function renderResult(d) {
         <div class="flex flex-wrap gap-2 mb-4">
           ${d.functional_groups.map(g=>`<span class="bg-white/60 text-ink text-xs font-bold px-3 py-1 pill">${g}</span>`).join('')}
         </div>` : ''}
-      <button onclick="location.reload()" class="w-full bg-ink text-white font-display text-lg py-4 pill active:scale-95">
-        다시 찍기
-      </button>
+      <div class="grid grid-cols-2 gap-2">
+        ${valid ? `<button id="save-gallery" class="bg-lime text-ink font-display text-base py-4 pill active:scale-95">갤러리 저장</button>` : ''}
+        <button onclick="location.reload()" class="${valid?'':'col-span-2'} bg-ink text-white font-display text-base py-4 pill active:scale-95">다시 찍기</button>
+      </div>
     </div>
   `;
   resultSection.classList.remove('hidden');
   resultSection.scrollIntoView({ behavior: 'smooth' });
+  const saveBtn = document.getElementById('save-gallery');
+  if (saveBtn) saveBtn.addEventListener('click', () => {
+    const entry = {
+      molecule_name_kr: d.molecule_name_kr, molecule_name_en: d.molecule_name_en,
+      formula: d.formula, is_valid: d.is_valid,
+      atoms: parseInt((d.formula||'').replace(/[^\d]/g,'')) || 0,
+      img: previewImg.src, date: new Date().toISOString().slice(0,10)
+    };
+    const g = loadGallery(); g.push(entry); saveGallery(g);
+    saveBtn.textContent = '저장됨 ✓'; saveBtn.disabled = true;
+    saveBtn.classList.remove('bg-lime'); saveBtn.classList.add('bg-white');
+  });
 }
 </script>
 </body>

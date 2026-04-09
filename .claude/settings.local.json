@@ -4,7 +4,9 @@
       "Bash(gh api:*)",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(t[''''path'''']\\) for t in d[''''tree'''']]\")",
       "Bash(curl -s https://raw.githubusercontent.com/scieum/guess-molecular-quiz/main/src/lib/molecules.ts)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(t['path']\\) for t in d['tree']]\")",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
