@@ -54,12 +54,12 @@
 
   <!-- Header -->
   <header class="flex items-center justify-between mb-6">
-    <div class="flex items-center gap-2">
+    <button id="logo-home" aria-label="홈으로" class="flex items-center gap-2 active:scale-95 transition">
       <div class="w-9 h-9 rounded-full bg-ink flex items-center justify-center">
         <span class="text-lime font-display text-lg">M</span>
       </div>
       <span class="font-display text-navy text-xl">MOLECULE</span>
-    </div>
+    </button>
     <button id="open-settings" aria-label="설정" class="w-10 h-10 rounded-full bg-white card-shadow flex items-center justify-center text-navy active:scale-95 transition">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -276,13 +276,19 @@ let currentUser = await ensureAuth();
 // The raw code is also stashed in user_metadata so we can show it back
 // to the user on the profile card and settings modal.
 //
-// CODE_DOMAIN must be a real-looking domain with a valid TLD because
-// Supabase's GoTrue rejects RFC 2606 reserved TLDs (.invalid, .test,
-// .example, .localhost) — they fail deliverability checks and the
-// validator returns "Email address \"\" is invalid". A non-existent
-// subdomain of a real domain is fine because we never actually deliver
-// any mail (Confirm email is OFF in the project settings).
-const CODE_DOMAIN = "users.molecule-checker.app";
+// CODE_DOMAIN must point at a real domain with real MX records because
+// Supabase's GoTrue runs deliverability checks on the email address
+// and rejects anything that looks undeliverable (RFC 2606 reserved
+// TLDs like .invalid/.test, plus non-existent .app subdomains, all
+// fail and surface as `Email address "" is invalid`).
+//
+// gmail.com has guaranteed MX records, and the local part is a 20-char
+// hex hash so collision with a real Gmail user is astronomically
+// unlikely (16^20 ≈ 1.2e24 possibilities). We never actually try to
+// deliver any mail because Confirm email is OFF in the project
+// settings; the address is purely a synthetic key for Supabase auth.
+const CODE_DOMAIN = "gmail.com";
+const CODE_PREFIX = "mc-";
 
 function normalizeCode(input) {
   return String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -308,7 +314,7 @@ async function identityToCredentials(nickname, code) {
   const id = await hashIdentity(nickname, code);
   const n = normalizeCode(code);
   return {
-    email: `mc-${id}@${CODE_DOMAIN}`,
+    email: `${CODE_PREFIX}${id}@${CODE_DOMAIN}`,
     password: `mc-pwd-${id}-${n}`,
   };
 }
@@ -1188,6 +1194,9 @@ document.getElementById('nav-upload').addEventListener('click', () => {
   showView('home');
   document.getElementById('file-input').click();
 });
+
+// Logo: jump back to the home view from any tab
+document.getElementById('logo-home').addEventListener('click', () => showView('home'));
 
 const fileInput = document.getElementById('file-input');
 const previewSection = document.getElementById('preview-section');
