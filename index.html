@@ -223,7 +223,7 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 4H4v2a3 3 0 0 0 3 3M17 4h3v2a3 3 0 0 1-3 3"/></svg>
     <span class="text-[10px] font-bold">전당</span>
   </button>
-  <button class="w-14 h-14 rounded-full bg-lime border-4 border-white -mt-8 card-shadow flex items-center justify-center">
+  <button id="nav-upload" aria-label="사진 업로드" class="w-14 h-14 rounded-full bg-lime border-4 border-white -mt-8 card-shadow flex items-center justify-center active:scale-95 transition">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0B0B0F" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
   </button>
   <button data-nav="catalog" class="flex flex-col items-center gap-1 text-gray-400">
@@ -777,6 +777,12 @@ function showView(name) {
 }
 document.querySelectorAll('[data-nav]').forEach(b => {
   b.addEventListener('click', () => showView(b.dataset.nav));
+});
+
+// Center plus button: jump to home and open the file picker
+document.getElementById('nav-upload').addEventListener('click', () => {
+  showView('home');
+  document.getElementById('file-input').click();
 });
 
 const fileInput = document.getElementById('file-input');
