@@ -24,9 +24,20 @@ alter table public.profiles
   add column if not exists profile_hash text;
 
 -- A given (nickname, code) pair maps to exactly one profile row.
-create unique index if not exists profiles_profile_hash_unique
-  on public.profiles (profile_hash)
-  where profile_hash is not null;
+-- Use a real UNIQUE constraint (not a partial index) so PostgREST's
+-- upsert `onConflict: 'profile_hash'` path can actually use it. NULLs
+-- are still allowed to repeat under Postgres's default behavior.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'profiles_profile_hash_unique'
+  ) then
+    alter table public.profiles
+      add constraint profiles_profile_hash_unique unique (profile_hash);
+  end if;
+end $$;
+
+drop index if exists public.profiles_profile_hash_unique;
 
 drop policy if exists "profiles are readable by owner" on public.profiles;
 drop policy if exists "profiles insertable by owner" on public.profiles;
