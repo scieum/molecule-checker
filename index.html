@@ -268,6 +268,43 @@ async function ensureAuth() {
 
 let currentUser = await ensureAuth();
 
+// ===== Code-based account identity =====
+// Users don't create email/password accounts. Instead each profile gets
+// an 8-char alphanumeric code that the user writes down. Internally we
+// upgrade the anonymous auth.users row to a permanent one keyed by a
+// synthetic `mc-{code}@molecule.invalid` email, with the code doubling
+// as the password. To "log in" on a new device the user types their
+// code and we reconstruct the same synthetic credentials.
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
+const CODE_DOMAIN = "molecule.invalid";
+const CODE_REGEX = new RegExp(`^mc-([a-z0-9]+)@${CODE_DOMAIN}$`, "i");
+
+function generateAuthCode() {
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+function normalizeCode(input) {
+  return String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function codeToCredentials(code) {
+  const n = normalizeCode(code);
+  return {
+    email: `mc-${n.toLowerCase()}@${CODE_DOMAIN}`,
+    password: `mc-pwd-${n}`,
+  };
+}
+
+function currentUserCode() {
+  const email = currentUser?.email || "";
+  const m = email.match(CODE_REGEX);
+  return m ? m[1].toUpperCase() : null;
+}
+
 // Public URL for a storage path in the molecule-images bucket.
 function publicImageUrl(path) {
   if (!path || !supabase) return "";
@@ -682,6 +719,7 @@ async function renderProfile() {
   if (!p) { body.innerHTML = profileSetupHTML(); wireProfileSetup(); return; }
 
   const gallery = await loadGallery();
+  const myCode = currentUserCode();
   body.innerHTML = `
     <section class="bg-white rounded-chunk p-5 card-shadow mb-4">
       <div class="flex items-center gap-4">
@@ -694,6 +732,16 @@ async function renderProfile() {
         </div>
         <button id="profile-edit" class="pill bg-ink text-lime text-xs font-bold px-3 py-2">편집</button>
       </div>
+      ${myCode ? `
+        <div class="mt-4 bg-ink rounded-2xl p-3 flex items-center justify-between">
+          <div>
+            <div class="text-[10px] text-lime font-bold tracking-wider">MY CODE</div>
+            <div class="font-display text-lime text-xl tracking-widest">${myCode}</div>
+          </div>
+          <button id="copy-code" class="pill bg-lime text-ink text-xs font-bold px-3 py-2 active:scale-95">복사</button>
+        </div>
+        <div class="text-[10px] text-gray-500 mt-1">다른 기기에서 설정(⚙) → 코드로 로그인에 입력하면 같은 데이터를 볼 수 있어요</div>
+      ` : ''}
       <div class="grid grid-cols-3 gap-2 mt-4 text-center">
         <div class="bg-cream rounded-2xl p-3">
           <div class="font-display text-navy text-xl">${gallery.length}</div>
@@ -739,6 +787,16 @@ async function renderProfile() {
     </section>
   `;
   document.getElementById('profile-edit').addEventListener('click', () => { body.innerHTML = profileSetupHTML(p); wireProfileSetup(); });
+  const copyBtn = document.getElementById('copy-code');
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(myCode);
+      copyBtn.textContent = '복사됨 ✓';
+      setTimeout(() => { copyBtn.textContent = '복사'; }, 1500);
+    } catch {
+      alert('내 코드: ' + myCode);
+    }
+  });
   body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', e => {
     const id = e.currentTarget.dataset.del;
     deleteGalleryEntry(id);
@@ -815,6 +873,33 @@ async function wireProfileSetup() {
   document.getElementById('p-save').addEventListener('click', async () => {
     const nick = document.getElementById('p-nick').value.trim();
     if (!nick) { alert('닉네임을 입력해주세요'); return; }
+
+    const saveBtn = document.getElementById('p-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '저장 중...';
+
+    // First-time save: mint a code and upgrade the anonymous user to a
+    // permanent account keyed by that code. All existing rows stay tied
+    // to the same user_id. If the user already has a code we reuse it.
+    let code = currentUserCode();
+    const isNewCode = !code;
+    if (isNewCode) {
+      code = generateAuthCode();
+      const creds = codeToCredentials(code);
+      const { data, error } = await supabase.auth.updateUser({
+        email: creds.email,
+        password: creds.password,
+      });
+      if (error) {
+        console.error('[auth] code assignment failed', error);
+        alert('코드 발급 실패: ' + error.message + '\n\nSupabase 대시보드에서 Authentication → Settings → "Confirm email" 이 OFF 인지 확인해 주세요.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = '저장';
+        return;
+      }
+      if (data.user) currentUser = data.user;
+    }
+
     await saveProfile({
       nickname: nick,
       regionCode: document.getElementById('p-region').value,
@@ -822,6 +907,10 @@ async function wireProfileSetup() {
       schoolCode: selected?.code || null,
       schoolName: selected?.name || null,
     });
+
+    if (isNewCode) {
+      alert(`내 코드: ${code}\n\n이 코드를 꼭 저장하세요!\n다른 기기에서 로그인할 때 필요합니다.\n\n설정(⚙) 버튼에서 언제든 다시 확인할 수 있어요.`);
+    }
     renderProfile();
   });
 }
@@ -834,10 +923,8 @@ async function openSettingsModal() {
     alert('Supabase 설정이 필요합니다. index.html 상단의 SUPABASE_URL / SUPABASE_ANON_KEY를 채워 주세요.');
     return;
   }
-  const { data: { session } } = await supabase.auth.getSession();
-  const user = session?.user;
-  const isAnon = !user || user.is_anonymous === true || !user.email;
-  const currentEmail = user?.email || '';
+  const myCode = currentUserCode();
+  const hasCode = !!myCode;
 
   const modal = document.createElement('div');
   modal.className = 'fixed inset-0 bg-ink/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4';
@@ -848,45 +935,36 @@ async function openSettingsModal() {
         <button id="set-close" class="w-9 h-9 rounded-full bg-white flex items-center justify-center text-ink">✕</button>
       </div>
 
-      <section class="bg-white rounded-2xl p-4 mb-4">
-        <div class="text-xs font-bold text-gray-500 mb-1">현재 계정</div>
-        <div class="font-display text-navy text-base truncate">
-          ${isAnon ? '익명 사용자' : currentEmail}
+      ${hasCode ? `
+      <section class="bg-ink rounded-2xl p-4 mb-4">
+        <div class="text-[10px] text-lime font-bold tracking-wider mb-1">MY CODE</div>
+        <div class="flex items-center justify-between gap-3">
+          <div class="font-display text-lime text-2xl tracking-widest">${myCode}</div>
+          <button id="set-copy" class="pill bg-lime text-ink text-xs font-bold px-3 py-2 active:scale-95">복사</button>
         </div>
-        ${isAnon ? '<div class="text-[11px] text-gray-500 mt-1">로그인하면 다른 기기에서도 같은 데이터를 볼 수 있어요</div>' : ''}
-      </section>
-
-      <section class="bg-white rounded-2xl p-4 mb-3">
-        <div class="font-display text-navy text-base mb-2">기존 계정으로 로그인</div>
-        <label class="block mb-2">
-          <div class="text-xs font-bold text-gray-600 mb-1">이메일</div>
-          <input id="si-email" type="email" autocomplete="email" class="w-full bg-cream rounded-2xl p-3 text-sm" placeholder="you@example.com"/>
-        </label>
-        <label class="block mb-3">
-          <div class="text-xs font-bold text-gray-600 mb-1">비밀번호</div>
-          <input id="si-password" type="password" autocomplete="current-password" class="w-full bg-cream rounded-2xl p-3 text-sm"/>
-        </label>
-        <button id="si-submit" class="w-full bg-ink text-lime font-display text-base py-3 pill active:scale-95 transition">로그인</button>
-        ${isAnon ? '<div class="text-[10px] text-[#C43] mt-2">⚠ 로그인하면 지금 익명으로 저장한 분자/전당 기록은 사라집니다</div>' : ''}
-      </section>
-
-      ${isAnon ? `
-      <section class="bg-white rounded-2xl p-4 mb-3">
-        <div class="font-display text-navy text-base mb-1">이메일로 내 계정 만들기</div>
-        <div class="text-[11px] text-gray-500 mb-2">현재 저장한 분자와 전당 기록을 그대로 이어서 사용합니다</div>
-        <label class="block mb-2">
-          <div class="text-xs font-bold text-gray-600 mb-1">이메일</div>
-          <input id="su-email" type="email" autocomplete="email" class="w-full bg-cream rounded-2xl p-3 text-sm" placeholder="you@example.com"/>
-        </label>
-        <label class="block mb-3">
-          <div class="text-xs font-bold text-gray-600 mb-1">비밀번호 (6자 이상)</div>
-          <input id="su-password" type="password" autocomplete="new-password" class="w-full bg-cream rounded-2xl p-3 text-sm"/>
-        </label>
-        <button id="su-submit" class="w-full bg-lime text-ink font-display text-base py-3 pill active:scale-95 transition">계정 만들기</button>
+        <div class="text-[10px] text-white/60 mt-2">다른 기기에서 이 코드로 로그인하면 같은 데이터를 볼 수 있어요</div>
       </section>
       ` : `
-      <button id="so-submit" class="w-full bg-white border-2 border-ink text-ink font-display text-base py-3 pill active:scale-95 transition">로그아웃</button>
+      <section class="bg-white rounded-2xl p-4 mb-4">
+        <div class="text-xs font-bold text-gray-500 mb-1">현재 상태</div>
+        <div class="font-display text-navy text-base">익명 사용자</div>
+        <div class="text-[11px] text-gray-500 mt-1">내정보 탭에서 프로필을 저장하면 코드가 발급됩니다</div>
+      </section>
       `}
+
+      <section class="bg-white rounded-2xl p-4 mb-3">
+        <div class="font-display text-navy text-base mb-2">코드로 로그인</div>
+        <div class="text-[11px] text-gray-500 mb-2">다른 기기에서 만든 코드를 입력하세요</div>
+        <label class="block mb-3">
+          <input id="login-code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" class="w-full bg-cream rounded-2xl p-3 text-sm font-display text-ink text-xl tracking-widest uppercase text-center" placeholder="ABCD2345" maxlength="12"/>
+        </label>
+        <button id="login-submit" class="w-full bg-ink text-lime font-display text-base py-3 pill active:scale-95 transition">로그인</button>
+        ${hasCode ? '<div class="text-[10px] text-[#C43] mt-2">⚠ 다른 코드로 로그인하면 지금 기기의 현재 데이터는 표시되지 않습니다</div>' : ''}
+      </section>
+
+      ${hasCode ? `
+      <button id="logout-submit" class="w-full bg-white border-2 border-ink text-ink font-display text-base py-3 pill active:scale-95 transition">로그아웃 (익명으로 돌아가기)</button>
+      ` : ''}
     </div>
   `;
   document.body.appendChild(modal);
@@ -894,56 +972,48 @@ async function openSettingsModal() {
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
   modal.querySelector('#set-close').addEventListener('click', close);
 
-  // Sign in with existing account (replaces current anonymous session).
-  modal.querySelector('#si-submit').addEventListener('click', async () => {
-    const email = modal.querySelector('#si-email').value.trim();
-    const password = modal.querySelector('#si-password').value;
-    if (!email || !password) { alert('이메일과 비밀번호를 입력해주세요'); return; }
-    const btn = modal.querySelector('#si-submit');
+  // Copy current code
+  const copyBtn = modal.querySelector('#set-copy');
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(myCode);
+      copyBtn.textContent = '복사됨 ✓';
+      setTimeout(() => { copyBtn.textContent = '복사'; }, 1500);
+    } catch {
+      alert('내 코드: ' + myCode);
+    }
+  });
+
+  // Log in with a code (signs in as the matching user).
+  modal.querySelector('#login-submit').addEventListener('click', async () => {
+    const raw = modal.querySelector('#login-code').value;
+    const code = normalizeCode(raw);
+    if (!code || code.length < 4) { alert('유효한 코드를 입력해 주세요'); return; }
+    const btn = modal.querySelector('#login-submit');
     btn.disabled = true;
     btn.textContent = '로그인 중...';
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const creds = codeToCredentials(code);
+    const { data, error } = await supabase.auth.signInWithPassword(creds);
     if (error) {
-      alert('로그인 실패: ' + error.message);
+      alert('로그인 실패: 코드를 찾을 수 없습니다');
+      console.error('[auth] code login failed', error);
       btn.disabled = false;
       btn.textContent = '로그인';
       return;
     }
     currentUser = data.user;
     close();
-    alert('로그인되었습니다 · ' + (data.user.email || ''));
+    alert('로그인되었습니다 · 코드 ' + code);
     renderProfile();
     renderHall();
   });
 
-  // Convert anonymous user to a permanent email account (preserves data).
-  const suBtn = modal.querySelector('#su-submit');
-  if (suBtn) suBtn.addEventListener('click', async () => {
-    const email = modal.querySelector('#su-email').value.trim();
-    const password = modal.querySelector('#su-password').value;
-    if (!email || !password) { alert('이메일과 비밀번호를 입력해주세요'); return; }
-    if (password.length < 6) { alert('비밀번호는 6자 이상이어야 합니다'); return; }
-    suBtn.disabled = true;
-    suBtn.textContent = '생성 중...';
-    const { data, error } = await supabase.auth.updateUser({ email, password });
-    if (error) {
-      alert('계정 생성 실패: ' + error.message);
-      suBtn.disabled = false;
-      suBtn.textContent = '계정 만들기';
-      return;
-    }
-    currentUser = data.user;
-    close();
-    alert('계정이 생성되었습니다. 이메일 확인 링크가 왔다면 눌러주세요.');
-    renderProfile();
-    renderHall();
-  });
-
-  // Sign out → back to a fresh anonymous session.
-  const soBtn = modal.querySelector('#so-submit');
-  if (soBtn) soBtn.addEventListener('click', async () => {
-    soBtn.disabled = true;
-    soBtn.textContent = '로그아웃 중...';
+  // Sign out → fall back to a fresh anonymous session.
+  const logoutBtn = modal.querySelector('#logout-submit');
+  if (logoutBtn) logoutBtn.addEventListener('click', async () => {
+    if (!confirm('로그아웃하면 이 기기에서 익명 사용자로 돌아갑니다. 계속할까요?')) return;
+    logoutBtn.disabled = true;
+    logoutBtn.textContent = '로그아웃 중...';
     await supabase.auth.signOut();
     currentUser = await ensureAuth();
     close();
