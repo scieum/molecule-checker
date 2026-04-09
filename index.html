@@ -485,16 +485,23 @@ async function renderHall() {
           <div class="text-[10px] text-gray-500 font-bold">ATOMS</div>
         </div>
       </div>
-      <div class="rounded-2xl overflow-hidden ring-4 ${ringCol} relative">
+      <button type="button" data-hof-id="${m.id}" class="block w-full text-left rounded-2xl overflow-hidden ring-4 ${ringCol} relative active:scale-[0.99] transition">
         <img src="${m.img}" alt="${m.molecule}" class="w-full h-44 object-cover" onerror="this.style.display='none'"/>
         <div class="absolute left-3 bottom-3 bg-ink/80 backdrop-blur text-white pill px-3 py-1">
           <span class="font-display text-sm">${m.molecule}</span>
           <span class="text-lime text-xs ml-1">${m.formula}</span>
         </div>
-      </div>
+      </button>
     </div>`;
   }).join('');
   document.getElementById('hall-submit-btn').addEventListener('click', openSubmitModal);
+  // Wire each card's photo to open the lightbox.
+  hallList.querySelectorAll('[data-hof-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const entry = list.find(x => x.id === btn.dataset.hofId);
+      if (entry) openHallLightbox(entry);
+    });
+  });
 }
 renderHall();
 
@@ -504,6 +511,40 @@ async function deleteHallEntry(id) {
   const { error } = await supabase.from("hall_of_fame").delete().eq("id", id);
   if (error) { console.error("[hall] delete failed", error); return; }
   renderHall();
+}
+
+// Lightbox: tap a Hall of Fame card to see the full-size photo + meta.
+function openHallLightbox(entry) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 bg-ink/90 backdrop-blur-sm flex flex-col items-center justify-center p-4';
+  overlay.innerHTML = `
+    <button id="lb-close" aria-label="닫기" class="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/10 text-white flex items-center justify-center text-2xl">✕</button>
+    <div class="w-full max-w-md flex flex-col items-center gap-4">
+      ${entry.img ? `
+        <img src="${entry.img}" alt="${entry.molecule}" class="max-w-full max-h-[60vh] object-contain rounded-2xl"/>
+      ` : `
+        <div class="w-full aspect-square max-h-[60vh] rounded-2xl bg-navy flex items-center justify-center text-lime font-display text-5xl">${entry.formula || '?'}</div>
+      `}
+      <div class="bg-cream rounded-chunk w-full p-5 card-shadow">
+        <div class="flex items-baseline gap-2 mb-1">
+          <div class="font-display text-navy text-2xl">${entry.molecule}</div>
+          <div class="font-display text-lime bg-ink px-2 py-1 rounded-lg text-sm">${entry.formula}</div>
+        </div>
+        <div class="text-sm text-gray-600 mb-3">${entry.user} · ${entry.school} · ${entry.date}</div>
+        <div class="flex items-end justify-between">
+          <div class="text-[10px] text-gray-500 font-bold tracking-wider">TOTAL ATOMS</div>
+          <div class="font-display text-navy text-4xl leading-none">${entry.atoms}</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#lb-close').addEventListener('click', close);
+  // Esc to close
+  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
 }
 
 // Submit modal
