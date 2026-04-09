@@ -271,11 +271,18 @@ let currentUser = await ensureAuth();
 // ===== Code-based account identity =====
 // Login key = (nickname, code) pair the user chooses themselves during
 // first profile setup. We derive a deterministic SHA-256 hash of the
-// pair and use it as a synthetic `mc-<hash>@molecule.invalid` email for
+// pair and use it as a synthetic `mc-<hash>@<CODE_DOMAIN>` email for
 // Supabase auth, with a password derived from the same hash + code.
 // The raw code is also stashed in user_metadata so we can show it back
 // to the user on the profile card and settings modal.
-const CODE_DOMAIN = "molecule.invalid";
+//
+// CODE_DOMAIN must be a real-looking domain with a valid TLD because
+// Supabase's GoTrue rejects RFC 2606 reserved TLDs (.invalid, .test,
+// .example, .localhost) — they fail deliverability checks and the
+// validator returns "Email address \"\" is invalid". A non-existent
+// subdomain of a real domain is fine because we never actually deliver
+// any mail (Confirm email is OFF in the project settings).
+const CODE_DOMAIN = "users.molecule-checker.app";
 
 function normalizeCode(input) {
   return String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
