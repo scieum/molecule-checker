@@ -241,12 +241,12 @@
 // Supabase configuration
 // =====================================================================
 // Fill these in with values from your Supabase project (Settings → API).
-// The anon key is safe to embed client-side; RLS policies enforce access.
+// The publishable key is safe to embed client-side; RLS policies enforce access.
 // Leave empty to run in demo mode (no backend, mock analyze result).
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://arqlhphdxpdktyztoeuz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_2Eain5IYHcKbhkK3uyY8rA_L4eVPGPu";
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
