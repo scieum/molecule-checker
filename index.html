@@ -887,7 +887,7 @@ analyzeBtn.addEventListener('click', async () => {
   }
 
   try {
-    const { data, error } = await supabase.functions.invoke('analyze', {
+    const { data, error } = await supabase.functions.invoke('rapid-service', {
       body: { image: currentBase64, mimeType: 'image/jpeg' },
     });
     if (error) throw error;
