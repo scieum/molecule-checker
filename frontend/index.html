@@ -237,6 +237,13 @@
 </nav>
 
 <script>
+// Backend proxy endpoint for Gemini Vision analysis.
+// Leave empty for demo mode (no backend) — the app will show a placeholder
+// notice instead of hitting a non-existent /api/analyze and logging a 404.
+// Set this to your deployed backend URL once it's available, e.g.
+//   "https://molecule-checker-backend.example.com/api/analyze"
+const BACKEND_URL = "";
+
 // Buildable molecules (from scieum/guess-molecular-quiz)
 const BUILDABLE = [
   {f:'H₂O',kr:'물',en:'Water'},{f:'CO₂',kr:'이산화 탄소',en:'Carbon Dioxide'},
@@ -706,25 +713,40 @@ analyzeBtn.addEventListener('click', async () => {
   loadingSection.classList.remove('hidden');
   resultSection.classList.add('hidden');
 
+  // Demo mode: no backend configured. Show a clear notice instead of
+  // sending a request to a non-existent endpoint (which would 404).
+  if (!BACKEND_URL) {
+    renderResult({
+      is_valid: null,
+      molecule_name_kr: "데모 모드",
+      molecule_name_en: "Demo Mode",
+      formula: "?",
+      explanation: "백엔드가 아직 연결되지 않아 실제 분석을 수행할 수 없습니다. index.html 상단의 BACKEND_URL 값을 배포된 백엔드 주소로 설정하면 실제 분석이 활성화됩니다.",
+      functional_groups: [],
+      confidence: "low"
+    });
+    loadingSection.classList.add('hidden');
+    return;
+  }
+
   try {
-    const res = await fetch('/api/analyze', {
+    const res = await fetch(BACKEND_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: currentBase64, mimeType: 'image/jpeg' })
     });
-    if (!res.ok) throw new Error('server');
+    if (!res.ok) throw new Error('server ' + res.status);
     const data = await res.json();
     renderResult(data);
   } catch (err) {
-    // Fallback mock (draft mode)
     renderResult({
-      is_valid: true,
-      molecule_name_kr: "에탄올",
-      molecule_name_en: "Ethanol",
-      formula: "C₂H₅OH",
-      explanation: "탄소 2개, 산소 1개, 수소 6개가 모두 원자가 규칙을 충족합니다. (※ 백엔드 미연결 — 목업 결과)",
-      functional_groups: ["하이드록시기 (-OH)"],
-      confidence: "high"
+      is_valid: null,
+      molecule_name_kr: "분석 실패",
+      molecule_name_en: "Analysis Failed",
+      formula: "?",
+      explanation: "백엔드 요청이 실패했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요. (" + (err && err.message ? err.message : 'unknown') + ")",
+      functional_groups: [],
+      confidence: "low"
     });
   } finally {
     loadingSection.classList.add('hidden');
