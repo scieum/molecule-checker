@@ -310,6 +310,50 @@ function currentUserCode() {
   return currentUser?.user_metadata?.code || null;
 }
 
+// ===== Atom counter =====
+// Parse a chemical formula like "C4H10O", "H₂O₂", or "Ca(OH)₂" and
+// return the total number of atoms. Handles:
+//   - Capital + optional lowercase element symbols (C, Ca, Cl, Na...)
+//   - ASCII digits and Unicode subscripts (₀-₉)
+//   - Implicit count of 1 when no number follows an element (CH4 → 5)
+//   - Parenthesized groups with multipliers, e.g. Ca(OH)₂ → 5
+function countAtoms(formula) {
+  if (!formula) return 0;
+  // Normalize Unicode subscripts to ASCII digits
+  const s = String(formula).replace(/[\u2080-\u2089]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) - 0x2080 + 0x30)
+  );
+  let i = 0;
+  function parseGroup() {
+    let total = 0;
+    while (i < s.length) {
+      const c = s[i];
+      if (c === "(" || c === "[") {
+        i++;
+        const inner = parseGroup();
+        let num = "";
+        while (i < s.length && /\d/.test(s[i])) { num += s[i]; i++; }
+        total += inner * (num ? parseInt(num, 10) : 1);
+      } else if (c === ")" || c === "]") {
+        i++;
+        return total;
+      } else if (/[A-Z]/.test(c)) {
+        // Element symbol: capital letter + optional lowercase letter
+        i++;
+        if (i < s.length && /[a-z]/.test(s[i])) i++;
+        let num = "";
+        while (i < s.length && /\d/.test(s[i])) { num += s[i]; i++; }
+        total += num ? parseInt(num, 10) : 1;
+      } else {
+        // Skip separators (·, ., -, space, etc.)
+        i++;
+      }
+    }
+    return total;
+  }
+  return parseGroup();
+}
+
 // Public URL for a storage path in the molecule-images bucket.
 function publicImageUrl(path) {
   if (!path || !supabase) return "";
@@ -391,7 +435,8 @@ async function loadHall() {
     school: r.school || "—",
     molecule: r.molecule,
     formula: r.formula || "?",
-    atoms: r.atoms,
+    // Self-heal old rows that were saved with the buggy concatenation count.
+    atoms: countAtoms(r.formula) || r.atoms || 0,
     date: (r.created_at || "").slice(0, 10),
     img: publicImageUrl(r.image_path),
   }));
@@ -517,7 +562,7 @@ async function openSubmitModal() {
       </label>
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
-        <input id="s-user" class="w-full bg-white rounded-2xl p-3 text-sm" placeholder="예: 화학왕민준" value="${nickEsc}"/>
+        <input id="s-user" class="w-full bg-white rounded-2xl p-3 text-sm" placeholder="예: 사이음" value="${nickEsc}"/>
       </label>
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">학교</div>
@@ -574,7 +619,8 @@ async function openSubmitModal() {
       btn.classList.add('border-lime');
       modal.querySelector('#s-mol').value = g.molecule_name_kr || '';
       modal.querySelector('#s-formula').value = g.formula || '';
-      modal.querySelector('#s-atoms').value = g.atoms || '';
+      // Recompute from formula so old rows with bad stored counts get fixed.
+      modal.querySelector('#s-atoms').value = countAtoms(g.formula) || g.atoms || '';
       if (g.img) {
         imgPreview.src = g.img;
         imgPreview.classList.remove('hidden');
@@ -696,7 +742,8 @@ async function loadGallery() {
     molecule_name_en: r.molecule_name_en,
     formula: r.formula,
     is_valid: r.is_valid,
-    atoms: r.atoms || 0,
+    // Self-heal old rows that were saved with the buggy concatenation count.
+    atoms: countAtoms(r.formula) || r.atoms || 0,
     image_path: r.image_path,
     img: publicImageUrl(r.image_path),
     date: (r.created_at || '').slice(0, 10),
@@ -815,7 +862,7 @@ function profileSetupHTML(p) {
       <div class="font-display text-navy text-lg mb-4">프로필 설정</div>
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
-        <input id="p-nick" ${hasCode ? 'readonly' : ''} class="w-full ${hasCode ? 'bg-gray-100 text-gray-500' : 'bg-cream'} rounded-2xl p-3 text-sm" value="${p?.nickname||''}" placeholder="예: 화학왕민준"/>
+        <input id="p-nick" ${hasCode ? 'readonly' : ''} class="w-full ${hasCode ? 'bg-gray-100 text-gray-500' : 'bg-cream'} rounded-2xl p-3 text-sm" value="${p?.nickname||''}" placeholder="예: 사이음"/>
         ${hasCode ? '<div class="text-[10px] text-gray-400 mt-1">닉네임은 로그인 키라서 변경할 수 없습니다</div>' : ''}
       </label>
       ${hasCode ? '' : `
@@ -989,7 +1036,7 @@ async function openSettingsModal() {
         <div class="text-[11px] text-gray-500 mb-2">다른 기기에서 만든 닉네임과 코드를 입력하세요</div>
         <label class="block mb-2">
           <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
-          <input id="login-nick" type="text" autocomplete="off" class="w-full bg-cream rounded-2xl p-3 text-sm" placeholder="예: 화학왕민준"/>
+          <input id="login-nick" type="text" autocomplete="off" class="w-full bg-cream rounded-2xl p-3 text-sm" placeholder="예: 사이음"/>
         </label>
         <label class="block mb-3">
           <div class="text-xs font-bold text-gray-600 mb-1">코드</div>
@@ -1268,7 +1315,7 @@ function renderResult(d) {
       molecule_name_en: d.molecule_name_en,
       formula:          d.formula,
       is_valid:         d.is_valid,
-      atoms:            parseInt((d.formula || '').replace(/[^\d]/g, '')) || 0,
+      atoms:            countAtoms(d.formula),
       image_path:       imagePath,
       confidence:       d.confidence,
       explanation:      d.explanation,
