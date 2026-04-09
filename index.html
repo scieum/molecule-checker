@@ -236,13 +236,64 @@
   </button>
 </nav>
 
-<script>
-// Backend proxy endpoint for Gemini Vision analysis.
-// Leave empty for demo mode (no backend) — the app will show a placeholder
-// notice instead of hitting a non-existent /api/analyze and logging a 404.
-// Set this to your deployed backend URL once it's available, e.g.
-//   "https://molecule-checker-backend.example.com/api/analyze"
-const BACKEND_URL = "";
+<script type="module">
+// =====================================================================
+// Supabase configuration
+// =====================================================================
+// Fill these in with values from your Supabase project (Settings → API).
+// The anon key is safe to embed client-side; RLS policies enforce access.
+// Leave empty to run in demo mode (no backend, mock analyze result).
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+
+const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true },
+    })
+  : null;
+
+// Ensure every visitor has a durable (anonymous) auth session so RLS
+// policies keyed on auth.uid() work out of the box. Users can later
+// upgrade to a real account without losing their data.
+async function ensureAuth() {
+  if (!supabase) return null;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) return session.user;
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) { console.error("[auth] anonymous sign-in failed", error); return null; }
+  return data.user;
+}
+
+let currentUser = await ensureAuth();
+
+// Public URL for a storage path in the molecule-images bucket.
+function publicImageUrl(path) {
+  if (!path || !supabase) return "";
+  const { data } = supabase.storage.from("molecule-images").getPublicUrl(path);
+  return data?.publicUrl || "";
+}
+
+// Upload a base64 data URL (or raw base64) to molecule-images/{uid}/{uuid}.jpg
+// and return the storage path. Returns null if not signed in or upload fails.
+async function uploadImage(base64OrDataUrl, mimeType = "image/jpeg") {
+  if (!supabase || !currentUser) return null;
+  const comma = base64OrDataUrl.indexOf(",");
+  const raw = base64OrDataUrl.startsWith("data:") && comma !== -1
+    ? base64OrDataUrl.slice(comma + 1)
+    : base64OrDataUrl;
+  const bin = atob(raw);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
+  const path = `${currentUser.id}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("molecule-images")
+    .upload(path, bytes, { contentType: mimeType, upsert: false });
+  if (error) { console.error("[storage] upload failed", error); return null; }
+  return path;
+}
 
 // Buildable molecules (from scieum/guess-molecular-quiz)
 const BUILDABLE = [
@@ -282,18 +333,39 @@ grid.innerHTML = BUILDABLE.map((m,i) => `
   </div>
 `).join('');
 
-// Hall of Fame — user submissions (mock data; real app would persist to backend)
-const HALL_KEY = 'molecule-hall-submissions';
-const DEFAULT_HALL = [];
-function loadHall() {
-  try { return JSON.parse(localStorage.getItem(HALL_KEY)) || DEFAULT_HALL; }
-  catch { return DEFAULT_HALL; }
+// Hall of Fame — persisted in Supabase (public read, authenticated write)
+async function loadHall() {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("hall_of_fame")
+    .select("id,user_id,nickname,school,molecule,formula,atoms,image_path,created_at")
+    .order("atoms", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) { console.error("[hall] load failed", error); return []; }
+  return (data || []).map(r => ({
+    id: r.id,
+    user: r.nickname,
+    school: r.school || "—",
+    molecule: r.molecule,
+    formula: r.formula || "?",
+    atoms: r.atoms,
+    date: (r.created_at || "").slice(0, 10),
+    img: publicImageUrl(r.image_path),
+  }));
 }
-function saveHall(list) { localStorage.setItem(HALL_KEY, JSON.stringify(list)); }
 
-function renderHall() {
-  const list = loadHall().sort((a,b)=>b.atoms-a.atoms);
+async function renderHall() {
   const hallList = document.getElementById('hall-list');
+  if (!supabase) {
+    hallList.innerHTML = `
+      <div class="bg-white rounded-chunk p-6 card-shadow text-center">
+        <div class="font-display text-navy text-lg mb-1">데모 모드</div>
+        <div class="text-xs text-gray-500">Supabase 설정 후 명예의 전당이 활성화됩니다</div>
+      </div>`;
+    return;
+  }
+  const list = await loadHall();
   const medal = ['🥇','🥈','🥉'];
   hallList.innerHTML = `
     <button id="hall-submit-btn" class="w-full bg-lime text-ink font-display text-lg py-4 pill active:scale-95 transition card-shadow mb-2 flex items-center justify-center gap-2">
@@ -335,6 +407,14 @@ function renderHall() {
   document.getElementById('hall-submit-btn').addEventListener('click', openSubmitModal);
 }
 renderHall();
+
+// Delete a hall of fame entry (only the owner can; enforced by RLS)
+async function deleteHallEntry(id) {
+  if (!supabase) return;
+  const { error } = await supabase.from("hall_of_fame").delete().eq("id", id);
+  if (error) { console.error("[hall] delete failed", error); return; }
+  renderHall();
+}
 
 // Submit modal
 function openSubmitModal() {
@@ -392,20 +472,39 @@ function openSubmitModal() {
     r.readAsDataURL(f);
   });
 
-  modal.querySelector('#s-submit').addEventListener('click', () => {
-    const entry = {
-      user:    modal.querySelector('#s-user').value.trim()   || '익명',
-      school:  modal.querySelector('#s-school').value.trim() || '—',
-      molecule:modal.querySelector('#s-mol').value.trim()    || '알수없음',
-      formula: modal.querySelector('#s-formula').value.trim()|| '?',
-      atoms:   parseInt(modal.querySelector('#s-atoms').value) || 0,
-      date:    new Date().toISOString().slice(0,10),
-      img:     imgData || 'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=600&q=70'
-    };
-    if (!entry.atoms) { alert('원자 수를 입력해주세요'); return; }
-    const list = loadHall();
-    list.push(entry);
-    saveHall(list);
+  modal.querySelector('#s-submit').addEventListener('click', async () => {
+    if (!supabase || !currentUser) {
+      alert('Supabase 설정이 필요합니다. index.html 상단의 SUPABASE_URL / SUPABASE_ANON_KEY를 채워 주세요.');
+      return;
+    }
+    const atoms = parseInt(modal.querySelector('#s-atoms').value) || 0;
+    if (!atoms) { alert('원자 수를 입력해주세요'); return; }
+
+    const submitBtn = modal.querySelector('#s-submit');
+    submitBtn.disabled = true;
+    submitBtn.textContent = '등록 중...';
+
+    let imagePath = null;
+    if (imgData) {
+      imagePath = await uploadImage(imgData, 'image/jpeg');
+    }
+
+    const { error } = await supabase.from('hall_of_fame').insert({
+      user_id:  currentUser.id,
+      nickname: modal.querySelector('#s-user').value.trim()   || '익명',
+      school:   modal.querySelector('#s-school').value.trim() || '—',
+      molecule: modal.querySelector('#s-mol').value.trim()    || '알수없음',
+      formula:  modal.querySelector('#s-formula').value.trim()|| '?',
+      atoms,
+      image_path: imagePath,
+    });
+    if (error) {
+      console.error('[hall] insert failed', error);
+      alert('등록 실패: ' + error.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = '등록하기';
+      return;
+    }
     close();
     renderHall();
   });
@@ -440,20 +539,79 @@ async function fetchSchools(regionCode, kind, query) {
   }));
 }
 
-// ===== Profile & Gallery =====
-const PROFILE_KEY = 'molecule-profile';
-const GALLERY_KEY = 'molecule-gallery';
-function loadProfile() { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)); } catch { return null; } }
-function saveProfile(p) { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); }
-function loadGallery() { try { return JSON.parse(localStorage.getItem(GALLERY_KEY)) || []; } catch { return []; } }
-function saveGallery(g) { localStorage.setItem(GALLERY_KEY, JSON.stringify(g)); }
+// ===== Profile & Gallery (Supabase) =====
+async function loadProfile() {
+  if (!supabase || !currentUser) return null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('nickname,school_code,school_name,school_kind,region_code')
+    .eq('user_id', currentUser.id)
+    .maybeSingle();
+  if (error) { console.error('[profile] load failed', error); return null; }
+  if (!data) return null;
+  return {
+    nickname: data.nickname,
+    regionCode: data.region_code,
+    kind: data.school_kind,
+    schoolCode: data.school_code,
+    schoolName: data.school_name,
+  };
+}
 
-function renderProfile() {
+async function saveProfile(p) {
+  if (!supabase || !currentUser) return;
+  const { error } = await supabase.from('profiles').upsert({
+    user_id:     currentUser.id,
+    nickname:    p.nickname,
+    region_code: p.regionCode || null,
+    school_kind: p.kind || null,
+    school_code: p.schoolCode || null,
+    school_name: p.schoolName || null,
+  });
+  if (error) { console.error('[profile] save failed', error); alert('프로필 저장 실패: ' + error.message); }
+}
+
+async function loadGallery() {
+  if (!supabase || !currentUser) return [];
+  const { data, error } = await supabase
+    .from('gallery_entries')
+    .select('id,molecule_name_kr,molecule_name_en,formula,is_valid,atoms,image_path,created_at')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: false });
+  if (error) { console.error('[gallery] load failed', error); return []; }
+  return (data || []).map(r => ({
+    id: r.id,
+    molecule_name_kr: r.molecule_name_kr,
+    molecule_name_en: r.molecule_name_en,
+    formula: r.formula,
+    is_valid: r.is_valid,
+    atoms: r.atoms || 0,
+    img: publicImageUrl(r.image_path),
+    date: (r.created_at || '').slice(0, 10),
+  }));
+}
+
+async function deleteGalleryEntry(id) {
+  if (!supabase) return;
+  const { error } = await supabase.from('gallery_entries').delete().eq('id', id);
+  if (error) { console.error('[gallery] delete failed', error); return; }
+  renderProfile();
+}
+
+async function renderProfile() {
   const body = document.getElementById('profile-body');
-  const p = loadProfile();
+  if (!supabase) {
+    body.innerHTML = `
+      <section class="bg-white rounded-chunk p-6 card-shadow text-center">
+        <div class="font-display text-navy text-lg mb-1">데모 모드</div>
+        <div class="text-xs text-gray-500">Supabase 설정 후 프로필이 활성화됩니다</div>
+      </section>`;
+    return;
+  }
+  const p = await loadProfile();
   if (!p) { body.innerHTML = profileSetupHTML(); wireProfileSetup(); return; }
 
-  const gallery = loadGallery();
+  const gallery = await loadGallery();
   body.innerHTML = `
     <section class="bg-white rounded-chunk p-5 card-shadow mb-4">
       <div class="flex items-center gap-4">
@@ -494,11 +652,11 @@ function renderProfile() {
           <div class="text-xs text-gray-500">분석 후 '갤러리에 저장'을 눌러보세요</div>
         </div>` : `
         <div class="grid grid-cols-2 gap-2.5">
-          ${gallery.map((g,i)=>`
+          ${gallery.map((g)=>`
             <div class="bg-cream rounded-2xl overflow-hidden">
               <div class="aspect-square bg-navy relative">
                 ${g.img ? `<img src="${g.img}" class="w-full h-full object-cover"/>` : `<div class="w-full h-full flex items-center justify-center text-lime font-display text-3xl">${g.formula||'?'}</div>`}
-                <button data-del="${i}" class="absolute top-1 right-1 w-6 h-6 rounded-full bg-ink/70 text-white text-xs">✕</button>
+                <button data-del="${g.id}" class="absolute top-1 right-1 w-6 h-6 rounded-full bg-ink/70 text-white text-xs">✕</button>
               </div>
               <div class="p-2">
                 <div class="font-display text-navy text-sm truncate">${g.molecule_name_kr||'—'}</div>
@@ -512,8 +670,8 @@ function renderProfile() {
   `;
   document.getElementById('profile-edit').addEventListener('click', () => { body.innerHTML = profileSetupHTML(p); wireProfileSetup(); });
   body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', e => {
-    const i = +e.currentTarget.dataset.del;
-    const g = loadGallery(); g.splice(i,1); saveGallery(g); renderProfile();
+    const id = e.currentTarget.dataset.del;
+    deleteGalleryEntry(id);
   }));
 }
 
@@ -554,11 +712,11 @@ function profileSetupHTML(p) {
   `;
 }
 
-function wireProfileSetup() {
+async function wireProfileSetup() {
   const resultEl = document.getElementById('p-result');
   const selectedEl = document.getElementById('p-selected');
   let selected = null;
-  const existing = loadProfile();
+  const existing = await loadProfile();
   if (existing) selected = { name: existing.schoolName, code: existing.schoolCode };
 
   document.getElementById('p-search').addEventListener('click', async () => {
@@ -584,10 +742,10 @@ function wireProfileSetup() {
     } catch (e) { resultEl.innerHTML = `<span class="text-red-500">${e.message}</span>`; }
   });
 
-  document.getElementById('p-save').addEventListener('click', () => {
+  document.getElementById('p-save').addEventListener('click', async () => {
     const nick = document.getElementById('p-nick').value.trim();
     if (!nick) { alert('닉네임을 입력해주세요'); return; }
-    saveProfile({
+    await saveProfile({
       nickname: nick,
       regionCode: document.getElementById('p-region').value,
       kind: document.getElementById('p-kind').value,
@@ -713,15 +871,14 @@ analyzeBtn.addEventListener('click', async () => {
   loadingSection.classList.remove('hidden');
   resultSection.classList.add('hidden');
 
-  // Demo mode: no backend configured. Show a clear notice instead of
-  // sending a request to a non-existent endpoint (which would 404).
-  if (!BACKEND_URL) {
+  // Demo mode: no Supabase configured. Show a clear notice.
+  if (!supabase) {
     renderResult({
       is_valid: null,
       molecule_name_kr: "데모 모드",
       molecule_name_en: "Demo Mode",
       formula: "?",
-      explanation: "백엔드가 아직 연결되지 않아 실제 분석을 수행할 수 없습니다. index.html 상단의 BACKEND_URL 값을 배포된 백엔드 주소로 설정하면 실제 분석이 활성화됩니다.",
+      explanation: "Supabase가 아직 연결되지 않아 실제 분석을 수행할 수 없습니다. index.html 상단의 SUPABASE_URL / SUPABASE_ANON_KEY 값을 설정하고, analyze Edge Function을 배포한 뒤 GEMINI_API_KEY 시크릿을 등록해 주세요.",
       functional_groups: [],
       confidence: "low"
     });
@@ -730,13 +887,11 @@ analyzeBtn.addEventListener('click', async () => {
   }
 
   try {
-    const res = await fetch(BACKEND_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: currentBase64, mimeType: 'image/jpeg' })
+    const { data, error } = await supabase.functions.invoke('analyze', {
+      body: { image: currentBase64, mimeType: 'image/jpeg' },
     });
-    if (!res.ok) throw new Error('server ' + res.status);
-    const data = await res.json();
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error + (data.message ? ': ' + data.message : ''));
     renderResult(data);
   } catch (err) {
     renderResult({
@@ -744,7 +899,7 @@ analyzeBtn.addEventListener('click', async () => {
       molecule_name_kr: "분석 실패",
       molecule_name_en: "Analysis Failed",
       formula: "?",
-      explanation: "백엔드 요청이 실패했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요. (" + (err && err.message ? err.message : 'unknown') + ")",
+      explanation: "Edge Function 요청이 실패했습니다. 네트워크 상태와 analyze 함수 배포를 확인해 주세요. (" + (err && err.message ? err.message : 'unknown') + ")",
       functional_groups: [],
       confidence: "low"
     });
@@ -787,16 +942,35 @@ function renderResult(d) {
   resultSection.classList.remove('hidden');
   resultSection.scrollIntoView({ behavior: 'smooth' });
   const saveBtn = document.getElementById('save-gallery');
-  if (saveBtn) saveBtn.addEventListener('click', () => {
-    const entry = {
-      molecule_name_kr: d.molecule_name_kr, molecule_name_en: d.molecule_name_en,
-      formula: d.formula, is_valid: d.is_valid,
-      atoms: parseInt((d.formula||'').replace(/[^\d]/g,'')) || 0,
-      img: previewImg.src, date: new Date().toISOString().slice(0,10)
-    };
-    const g = loadGallery(); g.push(entry); saveGallery(g);
-    saveBtn.textContent = '저장됨 ✓'; saveBtn.disabled = true;
-    saveBtn.classList.remove('bg-lime'); saveBtn.classList.add('bg-white');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    if (!supabase || !currentUser) {
+      alert('Supabase 설정이 필요합니다.');
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = '저장 중...';
+    const imagePath = previewImg.src ? await uploadImage(previewImg.src, 'image/jpeg') : null;
+    const { error } = await supabase.from('gallery_entries').insert({
+      user_id:          currentUser.id,
+      molecule_name_kr: d.molecule_name_kr,
+      molecule_name_en: d.molecule_name_en,
+      formula:          d.formula,
+      is_valid:         d.is_valid,
+      atoms:            parseInt((d.formula || '').replace(/[^\d]/g, '')) || 0,
+      image_path:       imagePath,
+      confidence:       d.confidence,
+      explanation:      d.explanation,
+    });
+    if (error) {
+      console.error('[gallery] save failed', error);
+      alert('저장 실패: ' + error.message);
+      saveBtn.disabled = false;
+      saveBtn.textContent = '갤러리 저장';
+      return;
+    }
+    saveBtn.textContent = '저장됨 ✓';
+    saveBtn.classList.remove('bg-lime');
+    saveBtn.classList.add('bg-white');
   });
 }
 </script>
