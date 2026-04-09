@@ -269,40 +269,45 @@ async function ensureAuth() {
 let currentUser = await ensureAuth();
 
 // ===== Code-based account identity =====
-// Users don't create email/password accounts. Instead each profile gets
-// an 8-char alphanumeric code that the user writes down. Internally we
-// upgrade the anonymous auth.users row to a permanent one keyed by a
-// synthetic `mc-{code}@molecule.invalid` email, with the code doubling
-// as the password. To "log in" on a new device the user types their
-// code and we reconstruct the same synthetic credentials.
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
+// Login key = (nickname, code) pair the user chooses themselves during
+// first profile setup. We derive a deterministic SHA-256 hash of the
+// pair and use it as a synthetic `mc-<hash>@molecule.invalid` email for
+// Supabase auth, with a password derived from the same hash + code.
+// The raw code is also stashed in user_metadata so we can show it back
+// to the user on the profile card and settings modal.
 const CODE_DOMAIN = "molecule.invalid";
-const CODE_REGEX = new RegExp(`^mc-([a-z0-9]+)@${CODE_DOMAIN}$`, "i");
-
-function generateAuthCode() {
-  let code = "";
-  for (let i = 0; i < 8; i++) {
-    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
-  }
-  return code;
-}
 
 function normalizeCode(input) {
   return String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function codeToCredentials(code) {
+function normalizeNickname(input) {
+  return String(input || "").trim().toLowerCase();
+}
+
+async function hashIdentity(nickname, code) {
+  const normalized = `${normalizeNickname(nickname)}:${normalizeCode(code)}`;
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(normalized),
+  );
+  return Array.from(new Uint8Array(buf))
+    .slice(0, 10)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function identityToCredentials(nickname, code) {
+  const id = await hashIdentity(nickname, code);
   const n = normalizeCode(code);
   return {
-    email: `mc-${n.toLowerCase()}@${CODE_DOMAIN}`,
-    password: `mc-pwd-${n}`,
+    email: `mc-${id}@${CODE_DOMAIN}`,
+    password: `mc-pwd-${id}-${n}`,
   };
 }
 
 function currentUserCode() {
-  const email = currentUser?.email || "";
-  const m = email.match(CODE_REGEX);
-  return m ? m[1].toUpperCase() : null;
+  return currentUser?.user_metadata?.code || null;
 }
 
 // Public URL for a storage path in the molecule-images bucket.
@@ -804,13 +809,22 @@ async function renderProfile() {
 }
 
 function profileSetupHTML(p) {
+  const hasCode = !!currentUserCode();
   return `
     <section class="bg-white rounded-chunk p-5 card-shadow">
       <div class="font-display text-navy text-lg mb-4">프로필 설정</div>
       <label class="block mb-3">
         <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
-        <input id="p-nick" class="w-full bg-cream rounded-2xl p-3 text-sm" value="${p?.nickname||''}" placeholder="예: 화학왕민준"/>
+        <input id="p-nick" ${hasCode ? 'readonly' : ''} class="w-full ${hasCode ? 'bg-gray-100 text-gray-500' : 'bg-cream'} rounded-2xl p-3 text-sm" value="${p?.nickname||''}" placeholder="예: 화학왕민준"/>
+        ${hasCode ? '<div class="text-[10px] text-gray-400 mt-1">닉네임은 로그인 키라서 변경할 수 없습니다</div>' : ''}
       </label>
+      ${hasCode ? '' : `
+      <label class="block mb-3">
+        <div class="text-xs font-bold text-gray-600 mb-1">내가 기억할 코드</div>
+        <input id="p-code" autocomplete="off" autocapitalize="characters" spellcheck="false" class="w-full bg-cream rounded-2xl p-3 text-sm font-display text-ink tracking-widest uppercase text-center" placeholder="예: ABCD2345" maxlength="12"/>
+        <div class="text-[10px] text-gray-500 mt-1">닉네임과 함께 로그인 키가 됩니다. 4자 이상 영문/숫자.</div>
+      </label>
+      `}
       <div class="grid grid-cols-2 gap-2 mb-2">
         <label class="block">
           <div class="text-xs font-bold text-gray-600 mb-1">시/도</div>
@@ -878,21 +892,39 @@ async function wireProfileSetup() {
     saveBtn.disabled = true;
     saveBtn.textContent = '저장 중...';
 
-    // First-time save: mint a code and upgrade the anonymous user to a
-    // permanent account keyed by that code. All existing rows stay tied
-    // to the same user_id. If the user already has a code we reuse it.
-    let code = currentUserCode();
-    const isNewCode = !code;
+    // First-time save: user picks a code, we bind (nickname, code) to
+    // the current anonymous user via a deterministic synthetic email.
+    // All gallery/hall rows stay attached because user_id is preserved.
+    // On subsequent edits we skip the auth update and only touch the
+    // profile row (nickname stays locked as the readonly field).
+    const existingCode = currentUserCode();
+    const isNewCode = !existingCode;
+    let code = existingCode;
+
     if (isNewCode) {
-      code = generateAuthCode();
-      const creds = codeToCredentials(code);
+      const rawCode = document.getElementById('p-code').value;
+      code = normalizeCode(rawCode);
+      if (code.length < 4) {
+        alert('코드는 4자 이상 영문/숫자로 입력해 주세요');
+        saveBtn.disabled = false;
+        saveBtn.textContent = '저장';
+        return;
+      }
+
+      const creds = await identityToCredentials(nick, code);
       const { data, error } = await supabase.auth.updateUser({
         email: creds.email,
         password: creds.password,
+        data: { code, login_nickname: nick },
       });
       if (error) {
-        console.error('[auth] code assignment failed', error);
-        alert('코드 발급 실패: ' + error.message + '\n\nSupabase 대시보드에서 Authentication → Settings → "Confirm email" 이 OFF 인지 확인해 주세요.');
+        const msg = (error.message || '').toLowerCase();
+        if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
+          alert('이미 같은 닉네임 + 코드 조합이 사용 중입니다. 다른 코드를 선택해 주세요.');
+        } else {
+          alert('코드 저장 실패: ' + error.message + '\n\nSupabase 대시보드 → Authentication → Settings → "Confirm email" 이 OFF 인지 확인해 주세요.');
+        }
+        console.error('[auth] identity binding failed', error);
         saveBtn.disabled = false;
         saveBtn.textContent = '저장';
         return;
@@ -909,7 +941,7 @@ async function wireProfileSetup() {
     });
 
     if (isNewCode) {
-      alert(`내 코드: ${code}\n\n이 코드를 꼭 저장하세요!\n다른 기기에서 로그인할 때 필요합니다.\n\n설정(⚙) 버튼에서 언제든 다시 확인할 수 있어요.`);
+      alert(`로그인 키\n\n닉네임: ${nick}\n코드: ${code}\n\n다른 기기에서 로그인할 때 이 두 가지가 모두 필요합니다.\n설정(⚙) 버튼에서 언제든 다시 확인할 수 있어요.`);
     }
     renderProfile();
   });
@@ -953,13 +985,18 @@ async function openSettingsModal() {
       `}
 
       <section class="bg-white rounded-2xl p-4 mb-3">
-        <div class="font-display text-navy text-base mb-2">코드로 로그인</div>
-        <div class="text-[11px] text-gray-500 mb-2">다른 기기에서 만든 코드를 입력하세요</div>
+        <div class="font-display text-navy text-base mb-2">닉네임 + 코드로 로그인</div>
+        <div class="text-[11px] text-gray-500 mb-2">다른 기기에서 만든 닉네임과 코드를 입력하세요</div>
+        <label class="block mb-2">
+          <div class="text-xs font-bold text-gray-600 mb-1">닉네임</div>
+          <input id="login-nick" type="text" autocomplete="off" class="w-full bg-cream rounded-2xl p-3 text-sm" placeholder="예: 화학왕민준"/>
+        </label>
         <label class="block mb-3">
+          <div class="text-xs font-bold text-gray-600 mb-1">코드</div>
           <input id="login-code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" class="w-full bg-cream rounded-2xl p-3 text-sm font-display text-ink text-xl tracking-widest uppercase text-center" placeholder="ABCD2345" maxlength="12"/>
         </label>
         <button id="login-submit" class="w-full bg-ink text-lime font-display text-base py-3 pill active:scale-95 transition">로그인</button>
-        ${hasCode ? '<div class="text-[10px] text-[#C43] mt-2">⚠ 다른 코드로 로그인하면 지금 기기의 현재 데이터는 표시되지 않습니다</div>' : ''}
+        ${hasCode ? '<div class="text-[10px] text-[#C43] mt-2">⚠ 다른 계정으로 로그인하면 지금 기기의 현재 데이터는 표시되지 않습니다</div>' : ''}
       </section>
 
       ${hasCode ? `
@@ -984,26 +1021,29 @@ async function openSettingsModal() {
     }
   });
 
-  // Log in with a code (signs in as the matching user).
+  // Log in with nickname + code (signs in as the matching user).
   modal.querySelector('#login-submit').addEventListener('click', async () => {
-    const raw = modal.querySelector('#login-code').value;
-    const code = normalizeCode(raw);
+    const nick = modal.querySelector('#login-nick').value.trim();
+    const rawCode = modal.querySelector('#login-code').value;
+    const code = normalizeCode(rawCode);
+    if (!nick) { alert('닉네임을 입력해 주세요'); return; }
     if (!code || code.length < 4) { alert('유효한 코드를 입력해 주세요'); return; }
+
     const btn = modal.querySelector('#login-submit');
     btn.disabled = true;
     btn.textContent = '로그인 중...';
-    const creds = codeToCredentials(code);
+    const creds = await identityToCredentials(nick, code);
     const { data, error } = await supabase.auth.signInWithPassword(creds);
     if (error) {
-      alert('로그인 실패: 코드를 찾을 수 없습니다');
-      console.error('[auth] code login failed', error);
+      alert('로그인 실패: 닉네임 또는 코드가 일치하지 않습니다');
+      console.error('[auth] identity login failed', error);
       btn.disabled = false;
       btn.textContent = '로그인';
       return;
     }
     currentUser = data.user;
     close();
-    alert('로그인되었습니다 · 코드 ' + code);
+    alert(`로그인되었습니다 · ${nick}`);
     renderProfile();
     renderHall();
   });
