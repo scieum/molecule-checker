@@ -425,21 +425,24 @@ async function loadHall() {
   const { data, error } = await supabase
     .from("hall_of_fame")
     .select("id,user_id,nickname,school,molecule,formula,atoms,image_path,created_at")
-    .order("atoms", { ascending: false })
-    .order("created_at", { ascending: false })
     .limit(100);
   if (error) { console.error("[hall] load failed", error); return []; }
-  return (data || []).map(r => ({
-    id: r.id,
-    user: r.nickname,
-    school: r.school || "—",
-    molecule: r.molecule,
-    formula: r.formula || "?",
-    // Self-heal old rows that were saved with the buggy concatenation count.
-    atoms: countAtoms(r.formula) || r.atoms || 0,
-    date: (r.created_at || "").slice(0, 10),
-    img: publicImageUrl(r.image_path),
-  }));
+  // Recompute atoms from the formula so old rows with the buggy stored
+  // count display correctly, then re-sort on the client because the DB
+  // still has the bad values.
+  return (data || [])
+    .map(r => ({
+      id: r.id,
+      user: r.nickname,
+      school: r.school || "—",
+      molecule: r.molecule,
+      formula: r.formula || "?",
+      atoms: countAtoms(r.formula) || r.atoms || 0,
+      date: (r.created_at || "").slice(0, 10),
+      created_at: r.created_at || "",
+      img: publicImageUrl(r.image_path),
+    }))
+    .sort((a, b) => b.atoms - a.atoms || b.created_at.localeCompare(a.created_at));
 }
 
 async function renderHall() {
