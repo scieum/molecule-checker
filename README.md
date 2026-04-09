@@ -19,10 +19,10 @@
 
 ```
 molecule-checker/
-├── frontend/
-│   └── index.html              # 단일 HTML + Tailwind CDN으로 동작하는 SPA
+├── index.html                  # 단일 HTML + Tailwind CDN으로 동작하는 SPA
 ├── .github/workflows/
 │   └── pages.yml               # GitHub Pages 자동 배포 워크플로
+├── README.md
 └── molecule-checker-design.md  # 전체 설계서 (워크플로·프롬프트·스키마)
 ```
 
@@ -33,7 +33,6 @@ molecule-checker/
 정적 파일이므로 별도 빌드 단계가 없습니다. 간단한 HTTP 서버로 열면 됩니다.
 
 ```bash
-cd frontend
 python3 -m http.server 8000
 # → http://localhost:8000
 ```
@@ -42,19 +41,27 @@ python3 -m http.server 8000
 
 ### GitHub Pages 배포
 
-`master` 브랜치에 푸시되면 `.github/workflows/pages.yml`이 `frontend/` 디렉터리를
-자동으로 업로드합니다. 리포지토리 설정에서 **Pages → Source: GitHub Actions**를
-선택해 주세요.
+`master` 브랜치에 푸시되면 `.github/workflows/pages.yml`이 리포 루트를 Pages
+아티팩트로 업로드하고 자동 배포합니다. 리포지토리 **Settings → Pages**에서
+**Source**를 **GitHub Actions**로 설정해 주세요. (기본값인 "Deploy from a
+branch"로 두어도 `index.html`이 리포 루트에 있어서 동작합니다.)
+
+배포 후 404가 계속 뜬다면 다음을 확인해 보세요.
+
+1. Settings → Pages에서 Source가 **GitHub Actions** 또는 **Deploy from a
+   branch: master / (root)** 둘 중 하나로 설정되어 있는지
+2. Actions 탭에서 "Deploy frontend to GitHub Pages" 워크플로가 성공했는지
+3. 접속 URL이 `https://<org>.github.io/molecule-checker/` 인지 (끝 슬래시 포함)
 
 ## 백엔드 연결
 
 실제 AI 분석은 API 키 노출 방지를 위해 **백엔드 프록시**를 거칩니다. 백엔드가
 배포되기 전에는 분석 버튼이 "데모 모드" 안내 카드를 보여주도록 되어 있습니다.
 
-백엔드를 배포한 뒤 `frontend/index.html` 상단의 `BACKEND_URL` 값을 설정하세요.
+백엔드를 배포한 뒤 `index.html` 상단의 `BACKEND_URL` 값을 설정하세요.
 
 ```js
-// frontend/index.html
+// index.html
 const BACKEND_URL = "https://your-backend.example.com/api/analyze";
 ```
 
@@ -87,7 +94,7 @@ const BACKEND_URL = "https://your-backend.example.com/api/analyze";
 
 프로필 탭의 학교 검색은 [NEIS 교육정보 개방 포털](https://open.neis.go.kr)의
 `schoolInfo` API를 사용합니다. 호출량이 많아질 경우 API 키를 발급받아
-`frontend/index.html`의 `NEIS_API_KEY` 값에 설정해 주세요.
+`index.html`의 `NEIS_API_KEY` 값에 설정해 주세요.
 
 ## 기술 스택
 
